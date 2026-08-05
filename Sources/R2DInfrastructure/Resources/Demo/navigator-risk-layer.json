@@ -1,0 +1,10 @@
+{
+  "layer_version": "demo-navigator-v1",
+  "cells": [
+    {"id": "demo-unknown", "data_state": "UNKNOWN", "risk_state": "NORMAL"},
+    {"id": "demo-stale", "data_state": "STALE", "risk_state": "NORMAL"},
+    {"id": "demo-rough", "data_state": "VERIFIED", "risk_state": "ROUGH"},
+    {"id": "demo-review", "data_state": "REVIEW", "risk_state": "SUSPECTED_DAMAGE"},
+    {"id": "demo-confirmed", "data_state": "VERIFIED", "risk_state": "CONFIRMED_DAMAGE"}
+  ]
+}

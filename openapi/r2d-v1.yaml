@@ -1,0 +1,429 @@
+openapi: 3.1.0
+info:
+  title: R2D P0 API
+  version: 1.0.0
+security:
+  - BearerAuth: []
+paths:
+  /v1/auth/refresh:
+    post:
+      operationId: refreshAccessToken
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TokenRefreshRequest' } } }
+      responses:
+        '200': { description: Rotated token pair, content: { application/json: { schema: { $ref: '#/components/schemas/TokenRefreshResponse' } } } }
+        '401': { $ref: '#/components/responses/APIError' }
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LogoutRequest' } } }
+      responses:
+        '204': { description: Refresh token revoked }
+  /v1/auth/bootstrap:
+    post:
+      operationId: bootstrapDevelopmentAccount
+      security: []
+      responses:
+        '200': { description: Development-only token pair, content: { application/json: { schema: { $ref: '#/components/schemas/TokenRefreshResponse' } } } }
+  /v1/map/cells:
+    get:
+      operationId: getRoadCells
+      parameters:
+        - { name: min_lat, in: query, required: true, schema: { type: number, format: double } }
+        - { name: min_lon, in: query, required: true, schema: { type: number, format: double } }
+        - { name: max_lat, in: query, required: true, schema: { type: number, format: double } }
+        - { name: max_lon, in: query, required: true, schema: { type: number, format: double } }
+        - { name: zoom, in: query, required: false, schema: { type: integer } }
+        - { name: layer_version, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Risk layer snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/RiskLayerSnapshot' } } } }
+        '304': { description: Layer version not modified }
+        '401': { $ref: '#/components/responses/APIError' }
+        '429': { $ref: '#/components/responses/APIError' }
+        '500': { $ref: '#/components/responses/APIError' }
+  /v1/map/cells/along-route:
+    post:
+      operationId: getRoadCellsAlongRoute
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AlongRouteRiskRequest' } } }
+      responses:
+        '200': { description: Route corridor risk layer, content: { application/json: { schema: { $ref: '#/components/schemas/RiskLayerSnapshot' } } } }
+        '304': { description: Layer version not modified }
+        '401': { $ref: '#/components/responses/APIError' }
+        '429': { $ref: '#/components/responses/APIError' }
+        '500': { $ref: '#/components/responses/APIError' }
+  /v1/map/cells/{cellId}:
+    get:
+      operationId: getRoadCell
+      parameters:
+        - { name: cellId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Road cell detail, content: { application/json: { schema: { $ref: '#/components/schemas/RoadCell' } } } }
+        '401': { $ref: '#/components/responses/APIError' }
+        '404': { $ref: '#/components/responses/APIError' }
+        '500': { $ref: '#/components/responses/APIError' }
+  /v1/routes/search:
+    post:
+      operationId: searchRoute
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RouteSearchRequest' } } }
+      responses:
+        '200':
+          description: Route domain candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routes]
+                properties: { routes: { type: array, items: { $ref: '#/components/schemas/Route' } } }
+  /v1/routes/{routeId}/refresh:
+    post:
+      operationId: refreshRoute
+      parameters:
+        - name: routeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_location]
+              properties: { current_location: { $ref: '#/components/schemas/Coordinate' } }
+      responses:
+        '200':
+          description: Refreshed route
+          content: { application/json: { schema: { $ref: '#/components/schemas/Route' } } }
+  /v1/rides:
+    post:
+      operationId: createRide
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRideRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }
+        '409': { $ref: '#/components/responses/APIError' }
+  /v1/rides/{rideId}:
+    get:
+      operationId: getRide
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses:
+        '200': { description: Ride session, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }
+  /v1/rides/{rideId}/activate:
+    post:
+      operationId: activateRide
+      parameters:
+        - $ref: '#/components/parameters/RideId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '200': { description: Activated, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }, '409': { $ref: '#/components/responses/APIError' } }
+  /v1/rides/{rideId}/pause:
+    post:
+      operationId: pauseRide
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses: { '200': { description: Paused, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }, '409': { $ref: '#/components/responses/APIError' } }
+  /v1/rides/{rideId}/resume:
+    post:
+      operationId: resumeRide
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses: { '200': { description: Resumed, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }, '409': { $ref: '#/components/responses/APIError' } }
+  /v1/rides/{rideId}/telemetry:
+    post:
+      operationId: uploadTelemetry
+      parameters:
+        - $ref: '#/components/parameters/RideId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: X-Client-Event-ID
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelemetryUploadRequest' }
+      responses:
+        '202':
+          description: Accepted or duplicate acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelemetryUploadResponse' }
+        '400': { $ref: '#/components/responses/APIError' }
+        '401': { $ref: '#/components/responses/APIError' }
+        '409': { $ref: '#/components/responses/APIError' }
+        '429': { $ref: '#/components/responses/APIError' }
+        '500': { $ref: '#/components/responses/APIError' }
+  /v1/rides/{rideId}/progress:
+    get:
+      operationId: getRideProgress
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses:
+        '200':
+          description: Server-confirmed progress
+          content: { application/json: { schema: { $ref: '#/components/schemas/RideProgress' } } }
+  /v1/rides/{rideId}/boss:
+    get:
+      operationId: getBossProgress
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses:
+        '200':
+          description: Server-confirmed boss progress
+          content: { application/json: { schema: { $ref: '#/components/schemas/BossProgress' } } }
+  /v1/rides/{rideId}/reward:
+    get:
+      operationId: getRewardProgress
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses:
+        '200':
+          description: Server-confirmed reward progress
+          content: { application/json: { schema: { $ref: '#/components/schemas/RewardProgress' } } }
+  /v1/rides/{rideId}/finish:
+    post:
+      operationId: finishRide
+      parameters:
+        - $ref: '#/components/parameters/RideId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '202': { description: Completed idempotently, content: { application/json: { schema: { $ref: '#/components/schemas/RideSession' } } } }, '409': { $ref: '#/components/responses/APIError' } }
+  /v1/rides/{rideId}/summary:
+    get:
+      operationId: getRideSummary
+      parameters: [ { $ref: '#/components/parameters/RideId' } ]
+      responses:
+        '200': { description: Final server summary, content: { application/json: { schema: { $ref: '#/components/schemas/RideSummary' } } } }
+  /v1/admin/cells:
+    get:
+      operationId: listAdminCells
+      responses:
+        '200': { description: All cells including review state, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RoadCell' } } } } }
+  /v1/admin/cells/{cellId}:
+    get:
+      operationId: getAdminCell
+      parameters: [ { name: cellId, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: Cell detail, content: { application/json: { schema: { $ref: '#/components/schemas/RoadCell' } } } } }
+  /v1/admin/cells/{cellId}/review:
+    post:
+      operationId: reviewAdminCell
+      parameters: [ { name: cellId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AdminCellReview' } } }
+      responses: { '200': { description: Reviewed cell, content: { application/json: { schema: { $ref: '#/components/schemas/RoadCell' } } } } }
+  /v1/admin/cells/{cellId}/repair-completed:
+    post:
+      operationId: repairCompleted
+      parameters: [ { name: cellId, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: Repair pending cell, content: { application/json: { schema: { $ref: '#/components/schemas/RoadCell' } } } }, '409': { $ref: '#/components/responses/APIError' } }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    TokenRefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties: { refresh_token: { type: string } }
+    TokenRefreshResponse:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in, expires_at]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, enum: [bearer] }
+        expires_in: { type: integer, minimum: 1 }
+        expires_at: { type: string, format: date-time }
+    LogoutRequest:
+      type: object
+      required: [refresh_token]
+      properties: { refresh_token: { type: string } }
+    CreateRideRequest:
+      type: object
+      required: [route_id, device_id]
+      properties:
+        route_id: { type: string }
+        device_id: { type: string }
+        boss_scope_id: { type: string, default: demo-district }
+    RideSession:
+      type: object
+      required: [id, route_id, device_id, state]
+      properties:
+        id: { type: string }
+        route_id: { type: string }
+        device_id: { type: string }
+        state: { type: string, enum: [CREATED, READY, ACTIVE, PAUSED, FINISHING, COMPLETED, ABORTED] }
+        started_at: { type: [string, 'null'], format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+    RideSummary:
+      type: object
+      required: [ride_id, state, valid_distance, confirmed_distance, confirmed_damage, confirmed_reward, acknowledged_chunks]
+      properties:
+        ride_id: { type: string }
+        state: { type: string }
+        valid_distance: { type: number, format: double }
+        confirmed_distance: { type: number, format: double }
+        confirmed_damage: { type: integer }
+        confirmed_reward: { type: integer }
+        acknowledged_chunks: { type: integer }
+    AdminCellReview:
+      type: object
+      required: [data_state, risk_state]
+      properties:
+        data_state: { type: string, enum: [UNKNOWN, STALE, REVIEW, VERIFIED] }
+        risk_state: { type: string, enum: [NORMAL, ROUGH, SUSPECTED_DAMAGE, CONFIRMED_DAMAGE, REPAIR_PENDING, RESTRICTED] }
+        reason: { type: string }
+    AlongRouteRiskRequest:
+      type: object
+      required: [route_id, coordinates, corridor_width_m]
+      properties:
+        route_id: { type: string }
+        coordinates: { type: array, minItems: 2, items: { $ref: '#/components/schemas/Coordinate' } }
+        corridor_width_m: { type: number, format: double, minimum: 1 }
+        layer_version: { type: [string, 'null'] }
+    RoadCell:
+      type: object
+      required: [cell_id, geometry, data_state, risk_state, risk_score, confidence, observation_count, independent_device_count, cell_version, layer_version]
+      properties:
+        cell_id: { type: string }
+        geometry: { type: string, description: P0 WKT POINT or LINESTRING }
+        data_state: { type: string, enum: [UNKNOWN, STALE, REVIEW, VERIFIED] }
+        risk_state: { type: string, enum: [NORMAL, ROUGH, SUSPECTED_DAMAGE, CONFIRMED_DAMAGE, REPAIR_PENDING, RESTRICTED] }
+        risk_score: { type: integer, minimum: 0, maximum: 100 }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        last_observed_at: { type: [string, 'null'], format: date-time }
+        valid_until: { type: [string, 'null'], format: date-time }
+        observation_count: { type: integer, minimum: 0 }
+        independent_device_count: { type: integer, minimum: 0 }
+        cell_version: { type: string }
+        layer_version: { type: string }
+    RiskLayerSnapshot:
+      type: object
+      required: [layer_version, generated_at, cells, not_modified]
+      properties:
+        layer_version: { type: string }
+        generated_at: { type: string, format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        cells: { type: array, items: { $ref: '#/components/schemas/RoadCell' } }
+        not_modified: { type: boolean }
+    Coordinate:
+      type: object
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+    RouteSearchRequest:
+      type: object
+      required: [origin, destination]
+      properties:
+        origin: { $ref: '#/components/schemas/Coordinate' }
+        destination: { $ref: '#/components/schemas/Coordinate' }
+    Turn:
+      type: object
+      required: [coordinate, instruction, distance]
+      properties:
+        coordinate: { $ref: '#/components/schemas/Coordinate' }
+        instruction: { type: string }
+        distance: { type: number, format: double }
+    RiskCell:
+      type: object
+      required: [id, geometry, risk_score, confidence]
+      properties:
+        id: { type: string }
+        geometry: { type: string }
+        risk_score: { type: number, format: double }
+        confidence: { type: number, format: double }
+    Route:
+      type: object
+      required: [id, polyline, total_distance, total_duration, remaining_distance, remaining_duration, turn_list, risk_cells, status]
+      properties:
+        id: { type: string }
+        polyline: { type: array, minItems: 2, items: { $ref: '#/components/schemas/Coordinate' } }
+        total_distance: { type: number, format: double }
+        total_duration: { type: number, format: double }
+        remaining_distance: { type: number, format: double }
+        remaining_duration: { type: number, format: double }
+        turn_list: { type: array, items: { $ref: '#/components/schemas/Turn' } }
+        risk_cells: { type: array, items: { $ref: '#/components/schemas/RiskCell' } }
+        status: { type: string, enum: [READY, ACTIVE, OFF_ROUTE, COMPLETED, CANCELLED] }
+        risk_layer_version: { type: [string, 'null'], description: Hint only; authoritative cells come from Risk Layer API }
+    RideProgress:
+      type: object
+      required: [valid_distance, confirmed_distance, processing_chunks, acknowledged_chunks, remaining_chunks]
+      properties:
+        valid_distance: { type: number, format: double }
+        confirmed_distance: { type: number, format: double }
+        processing_chunks: { type: integer, minimum: 0 }
+        acknowledged_chunks: { type: integer, minimum: 0 }
+        remaining_chunks: { type: integer, minimum: 0 }
+        risk_layer_version: { type: [string, 'null'] }
+    BossProgress:
+      type: object
+      required: [boss_hp, confirmed_damage, pending_damage, processing_state]
+      properties:
+        boss_hp: { type: integer, minimum: 0 }
+        confirmed_damage: { type: integer, minimum: 0 }
+        pending_damage: { type: integer, minimum: 0 }
+        processing_state: { type: string, enum: [PENDING, PROCESSING, CONFIRMED] }
+    RewardProgress:
+      type: object
+      required: [pending_reward, confirmed_reward]
+      properties:
+        pending_reward: { type: integer, minimum: 0 }
+        confirmed_reward: { type: integer, minimum: 0 }
+    TelemetryUploadRequest:
+      type: object
+      required: [session_id, chunk_seq, started_at, ended_at, checksum, sample_count, is_simulated, payload_encoding, payload]
+      properties:
+        session_id: { type: string }
+        chunk_seq: { type: integer, minimum: 1 }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        checksum: { type: string, description: SHA-256 of decrypted payload }
+        sample_count: { type: integer, minimum: 0 }
+        is_simulated: { type: boolean }
+        payload_encoding: { type: string, enum: [base64-json] }
+        payload: { type: string, contentEncoding: base64 }
+    TelemetryUploadResponse:
+      type: object
+      required: [accepted, duplicate, acknowledged_at]
+      properties:
+        accepted: { type: boolean }
+        duplicate: { type: boolean }
+        server_observation_id: { type: [string, 'null'] }
+        acknowledged_at: { type: string, format: date-time }
+        processing_status: { type: [string, 'null'] }
+    ErrorResponse:
+      type: object
+      required: [code, message, retryable, request_id]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        request_id: { type: string }
+  responses:
+    APIError:
+      description: API error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  parameters:
+    RideId:
+      name: rideId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
