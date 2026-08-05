@@ -1,0 +1,10 @@
+{
+  "origin": {"latitude": 37.5452, "longitude": 127.0392},
+  "destination": {"latitude": 37.5534, "longitude": 127.0488},
+  "routes": [
+    {"id": "demo-fast", "label": "빠른 경로"},
+    {"id": "demo-safe", "label": "안전 경로", "selected_for_demo": true},
+    {"id": "demo-bike", "label": "자전거 우선"}
+  ],
+  "reroute_id": "demo-safe-reroute"
+}

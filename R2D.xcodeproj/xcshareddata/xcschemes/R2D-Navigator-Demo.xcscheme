@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="1600" version="1.7">
+  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+    <BuildActionEntries>
+      <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">
+        <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="N001" BuildableName="R2D.app" BlueprintName="R2D" ReferencedContainer="container:R2D.xcodeproj"/>
+      </BuildActionEntry>
+    </BuildActionEntries>
+  </BuildAction>
+  <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="NO">
+    <EnvironmentVariables>
+      <EnvironmentVariable key="R2D_ENVIRONMENT" value="demoNavigator" isEnabled="YES"/>
+    </EnvironmentVariables>
+    <BuildableProductRunnable runnableDebuggingMode="0">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="N001" BuildableName="R2D.app" BlueprintName="R2D" ReferencedContainer="container:R2D.xcodeproj"/>
+    </BuildableProductRunnable>
+  </LaunchAction>
+  <AnalyzeAction buildConfiguration="Debug"/>
+</Scheme>

@@ -1,0 +1,9 @@
+{
+  "name": "R2D Navigator Demo Route",
+  "mode": "offline-replay",
+  "default_playback_speed": 3,
+  "update_interval_seconds": 1,
+  "inject_off_route": true,
+  "inject_gps_jump": false,
+  "loop": false
+}
