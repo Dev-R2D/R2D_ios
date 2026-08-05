@@ -58,7 +58,7 @@ public struct MapSDKView: View {
                 }
             }
             ForEach(state.turns) { turn in
-                Annotation(turn.instruction, coordinate: turn.coordinate.clLocationCoordinate) { Image(systemName: turn.isDestination ? "flag.checkered.circle.fill" : "arrow.turn.up.right.circle.fill").font(.title2).foregroundStyle(turn.isDestination ? .pink : .blue).background(.white, in: Circle()) }
+                Annotation(turn.instruction, coordinate: turn.coordinate.clLocationCoordinate) { Image(systemName: turn.isDestination ? "flag.checkered.circle.fill" : "arrow.turn.up.right").font(.title2).foregroundStyle(turn.isDestination ? .pink : .blue).padding(6).background(.white, in: Circle()) }
             }
             if let current = state.currentLocation {
                 Annotation("현재 위치", coordinate: current.clLocationCoordinate) { Image(systemName: "location.circle.fill").font(.title).foregroundStyle(.blue).background(.white, in: Circle()) }
