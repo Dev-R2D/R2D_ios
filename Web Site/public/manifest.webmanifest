@@ -1,0 +1,11 @@
+{
+  "name": "R2D — Road to Data",
+  "short_name": "R2D",
+  "description": "자전거 주행으로 도로 데이터를 탐사하고 동네 보스를 공략하는 도시 복구 게임",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070a09",
+  "theme_color": "#070a09",
+  "lang": "ko",
+  "orientation": "portrait"
+}
