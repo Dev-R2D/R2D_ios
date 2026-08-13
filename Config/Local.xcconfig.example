@@ -1,3 +1,4 @@
 // Copy this file to Config/Local.xcconfig and keep the copy out of Git.
 // Never paste the REST API key, Admin key, or JavaScript key here.
 KAKAO_NATIVE_APP_KEY = YOUR_NATIVE_APP_KEY
+R2D_GOOGLE_MAPS_API_KEY = YOUR_GOOGLE_MAPS_IOS_API_KEY

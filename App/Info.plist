@@ -35,7 +35,7 @@
 	<key>R2DIMPSBaseURL</key>
 	<string>https://imaps.inavi.com</string>
 	<key>R2DGoogleMapsAPIKey</key>
-	<string>AIzaSyD53IoKwA7Rejbnx2iGJSIdgs5dm2AALjA</string>
+	<string>$(R2D_GOOGLE_MAPS_API_KEY)</string>
 	<key>R2DMapboxAccessToken</key>
 	<string></string>
 	<key>UILaunchScreen</key>
