@@ -1,4 +1,4 @@
-# R2D_IOS
+# R2D_iOS
 
 R2D는 UIKit 기반 Navigator를 기본 제품으로 두고, iOS는 `UIViewController`, Android 확장은 Flutter와 JavaScript WebView 레이어를 기준으로 구현합니다.
 
