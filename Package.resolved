@@ -1,0 +1,15 @@
+{
+  "originHash" : "d94755a091aef9dad1e71298fdc28e3c2494a286e38fd8a92e0889a6f422089f",
+  "pins" : [
+    {
+      "identity" : "inavi-maps-sdk-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/inavi-systems/inavi-maps-sdk-ios",
+      "state" : {
+        "revision" : "de398ebbb83159a64352de87b7e33c66bfcbb026",
+        "version" : "0.22.0"
+      }
+    }
+  ],
+  "version" : 3
+}

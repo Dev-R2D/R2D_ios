@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>R2D</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>주행 경로 안내와 주행 중 위치 기록, 도로 상태 데이터 수집을 위해 위치가 필요합니다.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>주행 중 노면 상태 데이터를 수집하기 위해 동작 센서가 필요합니다.</string>
+	<key>R2DAPIBaseURL</key>
+	<string></string>
+	<key>KakaoNativeAppKey</key>
+	<string>$(KAKAO_NATIVE_APP_KEY)</string>
+	<key>iNaviAppKey</key>
+	<string>8bcae3ab93c9a5f6aa946f29ea441e564a794c2a</string>
+	<key>R2DIMPSAppKey</key>
+	<string>8bcae3ab93c9a5f6aa946f29ea441e564a794c2a</string>
+	<key>R2DIMPSBaseURL</key>
+	<string>https://imaps.inavi.com</string>
+	<key>R2DGoogleMapsAPIKey</key>
+	<string>AIzaSyD53IoKwA7Rejbnx2iGJSIdgs5dm2AALjA</string>
+	<key>R2DMapboxAccessToken</key>
+	<string></string>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>R2D.SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

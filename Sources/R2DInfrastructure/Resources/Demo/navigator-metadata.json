@@ -1,0 +1,12 @@
+{
+  "name": "R2D 화성시 Navigator Demo Route",
+  "target_area": "경기도 화성시",
+  "bike_road_source_date": "2026-06-01",
+  "geometry_notice": "공공데이터의 기점·종점만 사용한 데모 회랑이며 실제 도로 중심선이 아님",
+  "mode": "offline-replay",
+  "default_playback_speed": 3,
+  "update_interval_seconds": 1,
+  "inject_off_route": true,
+  "inject_gps_jump": false,
+  "loop": false
+}

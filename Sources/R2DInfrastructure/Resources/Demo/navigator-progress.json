@@ -1,0 +1,5 @@
+{
+  "ride": {"valid_distance": 240, "confirmed_distance": 220, "processing_chunks": 1},
+  "boss": {"boss_hp": 92, "confirmed_damage": 8, "pending_damage": 3},
+  "reward": {"pending_reward": 0, "confirmed_reward": 0}
+}

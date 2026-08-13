@@ -1,0 +1,13 @@
+{
+  "origin": {"latitude": 37.2358981701, "longitude": 127.035530669},
+  "destination": {"latitude": 37.2188446551, "longitude": 127.0564212205},
+  "source": "경기도_화성시_자전거도로_20260601.csv",
+  "source_route": "동탄원천로 1L(기점->1)",
+  "geometry_quality": "ENDPOINTS_ONLY",
+  "routes": [
+    {"id": "demo-fast", "label": "빠른 경로"},
+    {"id": "demo-safe", "label": "안전 경로", "selected_for_demo": true},
+    {"id": "demo-bike", "label": "화성시 자전거도로"}
+  ],
+  "reroute_id": "demo-safe-reroute"
+}
