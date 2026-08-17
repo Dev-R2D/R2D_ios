@@ -13,15 +13,16 @@ public final class ActiveRideCoordinator {
     private let mapRenderer: IMapRenderer
     private let riskLayerWorker: IRiskLayerSyncWorker
     private let roadWarningOutput: IRoadWarningOutput
+    private let evidenceRecorder: RideEvidenceRecording
     private let config: RideConfiguration
     private let telemetryPipeline: TelemetryPipeline?
     private var state = ActiveRideState.idle, listeners: [UUID: Listener] = [:]
     private var locationSubscription: Unsubscribe?, sensorSubscription: Unsubscribe?
     private var lastCoordinate: Coordinate?, roadWarningEngine: RoadWarningEngine
 
-    public init(sessions: RideSessionRepository, location: LocationTracker, sensors: SensorCollector, routes: IRouteRepository, navigationEngine: NavigationEngine = .init(), mapRenderer: IMapRenderer = NoopMapRenderer(), riskLayerWorker: IRiskLayerSyncWorker = NoopRiskLayerSyncWorker(), roadWarningEngine: RoadWarningEngine = .init(), roadWarningOutput: IRoadWarningOutput = NoopRoadWarningOutput(), queue: TelemetryQueue, progress: IRideProgressRepository, telemetryPipeline: TelemetryPipeline? = nil, progressConfiguration: RideProgressSyncConfiguration = .init(), clock: Clock = SystemClock(), config: RideConfiguration = .init()) {
+    public init(sessions: RideSessionRepository, location: LocationTracker, sensors: SensorCollector, routes: IRouteRepository, navigationEngine: NavigationEngine = .init(), mapRenderer: IMapRenderer = NoopMapRenderer(), riskLayerWorker: IRiskLayerSyncWorker = NoopRiskLayerSyncWorker(), roadWarningEngine: RoadWarningEngine = .init(), roadWarningOutput: IRoadWarningOutput = NoopRoadWarningOutput(), evidenceRecorder: RideEvidenceRecording = NoopRideEvidenceRecorder(), queue: TelemetryQueue, progress: IRideProgressRepository, telemetryPipeline: TelemetryPipeline? = nil, progressConfiguration: RideProgressSyncConfiguration = .init(), clock: Clock = SystemClock(), config: RideConfiguration = .init()) {
         self.sessions = sessions; self.location = location; self.sensors = sensors; self.routes = routes
-        self.navigationEngine = navigationEngine; self.mapRenderer = mapRenderer; self.riskLayerWorker = riskLayerWorker; self.roadWarningEngine = roadWarningEngine; self.roadWarningOutput = roadWarningOutput; self.queue = queue; self.progressWorker = RideProgressSyncWorker(repository: progress, configuration: progressConfiguration); self.telemetryPipeline = telemetryPipeline; self.clock = clock; self.config = config
+        self.navigationEngine = navigationEngine; self.mapRenderer = mapRenderer; self.riskLayerWorker = riskLayerWorker; self.roadWarningEngine = roadWarningEngine; self.roadWarningOutput = roadWarningOutput; self.evidenceRecorder = evidenceRecorder; self.queue = queue; self.progressWorker = RideProgressSyncWorker(repository: progress, configuration: progressConfiguration); self.telemetryPipeline = telemetryPipeline; self.clock = clock; self.config = config
         locationSubscription = location.subscribe { [weak self] value in Task { @MainActor in self?.receive(location: value) } }
         sensorSubscription = sensors.subscribe { [weak self] chunk in Task { @MainActor in self?.receive(chunk: chunk) } }
         Task { [weak self, progressWorker] in
@@ -61,8 +62,10 @@ public final class ActiveRideCoordinator {
         for option in options {
             results.append(contentsOf: try await routes.searchRoute(origin: origin, destination: destination, option: option))
         }
-        state.routes = results
-        state.selectedRoute = results.first
+        var seenRouteIDs = Set<String>()
+        let uniqueResults = results.filter { seenRouteIDs.insert($0.id).inserted }
+        state.routes = uniqueResults
+        state.selectedRoute = uniqueResults.first
         state.lastRiskLayerUpdate = clock.now()
         publish()
     }
@@ -107,6 +110,8 @@ public final class ActiveRideCoordinator {
         guard locationStatus.canStart else { state.presentationError = locationStatus.authorization == .denied ? .locationPermissionRequired : .locationUnavailable; publish(); throw LocationTrackingError.authorizationDenied }
         guard sensorStatus.canStart else { state.presentationError = .sensorUnavailable; publish(); throw SensorCollectionError.motionUnavailable }
         try RideStateMachine.transition(&session, to: .active, at: clock.now())
+        let startedAt = session.startedAt ?? clock.now()
+        Task { await evidenceRecorder.startRide(rideId: session.id, routeId: session.routeId, startedAt: startedAt) }
         do {
             if !location.isRunning { try location.start(sessionId: session.id) }
             try sensors.start(sessionId: session.id, profileId: session.deviceProfileId)
@@ -158,12 +163,14 @@ public final class ActiveRideCoordinator {
         let summary = RideSummary(sessionId: session.id, localDistanceM: session.localDistanceM, validDistanceM: snapshot.ride.validDistance, confirmedBaseDamage: snapshot.boss?.confirmedDamage ?? 0, confirmedDataDamage: 0, isFinal: snapshot.ride.remainingChunks == 0 && snapshot.ride.processingChunks == 0, pendingReward: snapshot.reward.pendingReward, confirmedReward: snapshot.reward.confirmedReward)
         session.validDistanceM = summary.validDistanceM; try RideStateMachine.transition(&session, to: .completed, at: clock.now())
         await progressWorker.stopPolling()
-        navigationEngine.clear(); roadWarningEngine.reset(); state.roadWarning = nil; state.riskLayerSnapshot = nil; state.mapState = .empty; mapRenderer.clearRoute(); await riskLayerWorker.clearRouteContext(); location.stop(); sensors.stop(); try sessions.save(session); state.session = session; publish(); return summary
+        let evidence = await evidenceRecorder.stopRide()
+        navigationEngine.clear(); roadWarningEngine.reset(); state.roadWarning = nil; state.riskLayerSnapshot = nil; state.mapState = .empty; state.latestRideEvidence = evidence; mapRenderer.clearRoute(); await riskLayerWorker.clearRouteContext(); location.stop(); sensors.stop(); try sessions.save(session); state.session = session; publish(); return summary
     }
 
     private func receive(location value: LocationSnapshot) {
         state.location = value
         state.mapState.currentLocation = value.coordinate
+        Task { await evidenceRecorder.recordLocation(value, at: clock.now()) }
         guard var session = state.session, session.state == .active else {
             publish()
             return
@@ -173,6 +180,9 @@ public final class ActiveRideCoordinator {
             rejectedGPSJump = navigation.rejectedGPSJump
             state.navigationProgress = navigation; state.selectedRoute = navigation.route; session.routeProgressRatio = navigation.progressRatio
             state.nextInstruction = navigation.nextTurn.map { .init(title: $0.instruction, distanceM: navigation.distanceToNextTurn) }
+            if !navigation.isOffRoute, state.routeCorrectionNotice?.status == .offRoute {
+                state.routeCorrectionNotice = nil
+            }
             if navigation.isOffRoute { requestReroute(from: current, route: navigation.route) }
             let displayedLocation = navigation.matchedCoordinate ?? current
             let camera = MapModelMapper.followingCamera(current: displayedLocation, heading: value.heading, nextTurn: navigation.nextTurn, distanceToTurn: navigation.distanceToNextTurn)
@@ -187,13 +197,20 @@ public final class ActiveRideCoordinator {
     }
 
     private func requestReroute(from coordinate: Coordinate, route: Route) {
-        guard !state.isRerouting else { return }; state.isRerouting = true; publish()
+        guard !state.isRerouting else { return }
+        state.isRerouting = true
+        state.routeCorrectionNotice = .init(status: .rerouting, message: "경로를 벗어났습니다. 현재 위치 기준으로 새 경로를 안내합니다.", coordinate: coordinate)
+        publish()
         Task { [weak self] in
             guard let self else { return }
             do {
                 let refreshed = try await routes.refreshRoute(route, from: coordinate)
-                navigationEngine.setRoute(refreshed); state.selectedRoute = refreshed; state.navigationProgress = nil; state.nextInstruction = refreshed.turnList.first.map { .init(title: $0.instruction, distanceM: $0.distance) }; renderRouteOnMap(refreshed, cameraMode: .automatic); state.isRerouting = false; publish(); await syncRiskRoute(refreshed)
-            } catch { state.isRerouting = false; publish() }
+                navigationEngine.setRoute(refreshed); state.selectedRoute = refreshed; state.navigationProgress = nil; state.nextInstruction = refreshed.turnList.first.map { .init(title: $0.instruction, distanceM: $0.distance) }; renderRouteOnMap(refreshed, cameraMode: .automatic); state.isRerouting = false; state.routeCorrectionNotice = .init(status: .corrected, message: "새 경로로 정정했습니다. 안내를 따라 계속 주행하세요.", coordinate: coordinate); publish(); await syncRiskRoute(refreshed)
+            } catch {
+                state.isRerouting = false
+                state.routeCorrectionNotice = .init(status: .failed, message: "경로 이탈을 감지했지만 새 경로를 가져오지 못했습니다. 안전한 곳에서 경로를 다시 탐색해 주세요.", coordinate: coordinate)
+                publish()
+            }
         }
     }
 
@@ -209,6 +226,7 @@ public final class ActiveRideCoordinator {
 
     private func receive(chunk: SensorChunk) {
         guard var session = state.session, session.state == .active else { return }
+        Task { await evidenceRecorder.processSensorChunk(chunk) }
         if telemetryPipeline == nil { try? queue.enqueue(chunk) }
         session.lastChunkSeq = max(session.lastChunkSeq, chunk.chunkSeq)
         state.queuedChunkCount = telemetryPipeline == nil ? queue.pending(sessionId: session.id).count : state.telemetrySummary.unsentCount; state.session = session

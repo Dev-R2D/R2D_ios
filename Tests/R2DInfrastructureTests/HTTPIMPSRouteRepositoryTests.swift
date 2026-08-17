@@ -182,6 +182,34 @@ import R2DCore
     #expect(route.totalDuration == 261)
 }
 
+@Test func httpIMPSRouteReportsCapacityExceededBeforeRouteDecode() async throws {
+    let body = Data(
+        #"""
+        {
+          "header": {
+            "isSuccessful": false,
+            "resultCode": 302,
+            "resultMessage": "Limit Exceeded"
+          }
+        }
+        """#.utf8
+    )
+    let transport = IMPSRouteRecordingTransport(body: body)
+    let client = HTTPClient(baseURL: URL(string: "https://imaps.example.test")!, transport: transport)
+    let repository = HTTPIMPSRouteRepository(
+        client: client,
+        configuration: .init(appKey: "test-key")
+    )
+
+    await #expect(throws: IMPSRepositoryError.capacityExceeded) {
+        _ = try await repository.searchRoute(
+            origin: .init(latitude: 37.551, longitude: 126.981),
+            destination: .init(latitude: 37.554, longitude: 126.989),
+            option: "pm"
+        )
+    }
+}
+
 private actor IMPSRouteRecordingTransport: HTTPTransport {
     let body: Data
     private(set) var requests: [URLRequest] = []

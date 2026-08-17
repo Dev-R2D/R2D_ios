@@ -134,6 +134,127 @@ public struct LocationSample: Equatable, Sendable {
         self.latitude = latitude; self.longitude = longitude; self.altitudeM = altitudeM; self.speedMps = speedMps; self.bearingDegrees = bearingDegrees; self.horizontalAccuracyM = horizontalAccuracyM; self.timestamp = timestamp; self.quality = quality
     }
 }
+
+public struct SensorVector3: Codable, Equatable, Sendable {
+    public let x: Double, y: Double, z: Double
+    public init(x: Double, y: Double, z: Double) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+    public var magnitude: Double { sqrt(x * x + y * y + z * z) }
+}
+
+public struct RoadSurfaceSensorSample: Codable, Equatable, Sendable {
+    public enum Source: String, Codable, Sendable {
+        case accelerometer
+        case gyroscope
+        case deviceMotion
+        case sensorLogger
+    }
+    public let timestamp: TimeInterval
+    public let source: Source
+    public let acceleration: SensorVector3?
+    public let rotationRate: SensorVector3?
+    public let gravity: SensorVector3?
+    public let vibrationRMS: Double?
+    public let jerk: Double?
+    public let coordinate: Coordinate?
+    public let speedMps: Double?
+    public init(
+        timestamp: TimeInterval,
+        source: Source,
+        acceleration: SensorVector3? = nil,
+        rotationRate: SensorVector3? = nil,
+        gravity: SensorVector3? = nil,
+        vibrationRMS: Double? = nil,
+        jerk: Double? = nil,
+        coordinate: Coordinate? = nil,
+        speedMps: Double? = nil
+    ) {
+        self.timestamp = timestamp
+        self.source = source
+        self.acceleration = acceleration
+        self.rotationRate = rotationRate
+        self.gravity = gravity
+        self.vibrationRMS = vibrationRMS
+        self.jerk = jerk
+        self.coordinate = coordinate
+        self.speedMps = speedMps
+    }
+}
+
+public struct RideEvidenceEvent: Identifiable, Codable, Equatable, Sendable {
+    public let id: String
+    public let rideID: String
+    public let elapsedTimeMS: Int
+    public let eventType: String
+    public let accelerationPeak: Double
+    public let jerk: Double
+    public let gyroscopeRMS: Double
+    public let coordinate: Coordinate?
+    public let speedMps: Double?
+    public let createdAt: Date
+    public init(
+        id: String,
+        rideID: String,
+        elapsedTimeMS: Int,
+        eventType: String = "impact_candidate",
+        accelerationPeak: Double,
+        jerk: Double,
+        gyroscopeRMS: Double,
+        coordinate: Coordinate?,
+        speedMps: Double?,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.rideID = rideID
+        self.elapsedTimeMS = elapsedTimeMS
+        self.eventType = eventType
+        self.accelerationPeak = accelerationPeak
+        self.jerk = jerk
+        self.gyroscopeRMS = gyroscopeRMS
+        self.coordinate = coordinate
+        self.speedMps = speedMps
+        self.createdAt = createdAt
+    }
+}
+
+public struct RideEvidenceClip: Identifiable, Codable, Equatable, Sendable {
+    public let id: String
+    public let eventID: String
+    public let clipURL: URL?
+    public let frameURLs: [URL]
+    public let analysisRequestURL: URL?
+    public let startsAtMS: Int
+    public let endsAtMS: Int
+    public init(id: String, eventID: String, clipURL: URL?, frameURLs: [URL], analysisRequestURL: URL?, startsAtMS: Int, endsAtMS: Int) {
+        self.id = id
+        self.eventID = eventID
+        self.clipURL = clipURL
+        self.frameURLs = frameURLs
+        self.analysisRequestURL = analysisRequestURL
+        self.startsAtMS = startsAtMS
+        self.endsAtMS = endsAtMS
+    }
+}
+
+public struct RideEvidenceSummary: Codable, Equatable, Sendable {
+    public let rideID: String
+    public let startedAt: Date
+    public let endedAt: Date
+    public let videoURL: URL?
+    public let events: [RideEvidenceEvent]
+    public let clips: [RideEvidenceClip]
+    public init(rideID: String, startedAt: Date, endedAt: Date, videoURL: URL?, events: [RideEvidenceEvent], clips: [RideEvidenceClip]) {
+        self.rideID = rideID
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.videoURL = videoURL
+        self.events = events
+        self.clips = clips
+    }
+}
 public struct LocationReadiness: Equatable, Sendable {
     public let servicesEnabled: Bool, authorization: LocationAuthorizationState, isAccuracySufficient: Bool
     public init(servicesEnabled: Bool, authorization: LocationAuthorizationState, isAccuracySufficient: Bool) { self.servicesEnabled = servicesEnabled; self.authorization = authorization; self.isAccuracySufficient = isAccuracySufficient }
@@ -493,10 +614,20 @@ public struct ActiveRideState: Equatable, Sendable {
     public var riskLayerVersion: String? = nil
     public var navigationProgress: NavigationProgress? = nil
     public var isRerouting = false
+    public var routeCorrectionNotice: RouteCorrectionNotice? = nil
     public var mapState = MapState.empty
     public var riskLayerSnapshot: RiskLayerSnapshot? = nil
     public var roadWarning: RoadWarning? = nil
+    public var latestRideEvidence: RideEvidenceSummary? = nil
     public static let idle = ActiveRideState()
+}
+
+public struct RouteCorrectionNotice: Equatable, Sendable {
+    public enum Status: String, Equatable, Sendable { case offRoute, rerouting, corrected, failed }
+    public let status: Status, message: String, coordinate: Coordinate?
+    public init(status: Status, message: String, coordinate: Coordinate? = nil) {
+        self.status = status; self.message = message; self.coordinate = coordinate
+    }
 }
 
 public enum RidePresentationError: String, Equatable, Sendable { case locationPermissionRequired, locationUnavailable, sensorUnavailable, collectionStartFailed }

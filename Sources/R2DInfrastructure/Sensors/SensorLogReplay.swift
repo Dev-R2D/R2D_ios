@@ -1,22 +1,6 @@
 import Foundation
 import R2DCore
 
-public struct SensorVector3: Codable, Equatable, Sendable {
-    public let x: Double, y: Double, z: Double
-    public init(x: Double, y: Double, z: Double) { self.x = x; self.y = y; self.z = z }
-}
-
-/// Canonical payload shared by CoreMotion and imported Sensor Logger recordings.
-public struct RoadSurfaceSensorSample: Codable, Equatable, Sendable {
-    public enum Source: String, Codable, Sendable { case accelerometer, gyroscope, deviceMotion, sensorLogger }
-    public let timestamp: TimeInterval, source: Source
-    public let acceleration: SensorVector3?, rotationRate: SensorVector3?, gravity: SensorVector3?
-    public let vibrationRMS: Double?, jerk: Double?, coordinate: Coordinate?, speedMps: Double?
-    public init(timestamp: TimeInterval, source: Source, acceleration: SensorVector3? = nil, rotationRate: SensorVector3? = nil, gravity: SensorVector3? = nil, vibrationRMS: Double? = nil, jerk: Double? = nil, coordinate: Coordinate? = nil, speedMps: Double? = nil) {
-        self.timestamp = timestamp; self.source = source; self.acceleration = acceleration; self.rotationRate = rotationRate; self.gravity = gravity; self.vibrationRMS = vibrationRMS; self.jerk = jerk; self.coordinate = coordinate; self.speedMps = speedMps
-    }
-}
-
 public struct SensorLoggerCSVDecoder: Sendable {
     public enum SensorKind: Sendable { case accelerometer, gyroscope, gravity, location, combined }
     public init() {}

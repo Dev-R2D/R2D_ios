@@ -83,6 +83,39 @@ import R2DInfrastructure
     _ = try? await coordinator.finish()
 }
 
+@Test @MainActor func navigatorDemoOffRouteControlShowsCorrectionNotice() async throws {
+    let container = AppContainer.demoNavigator(), coordinator = container.activeRideCoordinator
+    try await coordinator.searchRoutes(origin: DemoNavigatorFixture.origin, destination: DemoNavigatorFixture.destination)
+    let route = try #require(coordinator.getSnapshot().routes.first)
+    coordinator.selectRoute(route)
+    _ = try coordinator.prepare()
+    _ = try coordinator.start()
+    container.viewModel.simulateOffRouteCorrection()
+    try await waitUntil(timeout: 5) { coordinator.getSnapshot().routeCorrectionNotice?.status == .corrected }
+    #expect(coordinator.getSnapshot().selectedRoute?.id == "demo-safe-reroute")
+    _ = try? await coordinator.finish()
+}
+
+@Test @MainActor func finishingDemoNavigationPublishesRideReport() async throws {
+    let container = AppContainer.demoNavigator(), viewModel = container.viewModel
+    viewModel.searchRoute(originQuery: "37.1848896, 127.1043303", destinationQuery: "37.2005333, 127.0964250")
+    try await waitUntil(timeout: 5) { !viewModel.state.routes.isEmpty }
+    viewModel.startSelectedRoute()
+    try await Task.sleep(for: .milliseconds(120))
+    viewModel.finishRide()
+    try await waitUntil(timeout: 5) { viewModel.pendingReplay != nil }
+    #expect(viewModel.pendingReplay?.route.polyline.count ?? 0 >= 2)
+}
+
+@Test @MainActor func startingSelectedRouteBeginsAtRouteOrigin() async throws {
+    let container = AppContainer.demoNavigator(), viewModel = container.viewModel
+    try await container.activeRideCoordinator.searchRoutes(origin: DemoNavigatorFixture.origin, destination: DemoNavigatorFixture.destination)
+    let route = try #require(container.activeRideCoordinator.getSnapshot().routes.first)
+    container.activeRideCoordinator.selectRoute(route)
+    viewModel.startSelectedRoute()
+    #expect(viewModel.state.location.coordinate == route.polyline.first)
+}
+
 @MainActor private func waitUntil(timeout: TimeInterval, condition: @escaping @MainActor () -> Bool) async throws {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }

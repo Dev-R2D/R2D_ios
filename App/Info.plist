@@ -24,14 +24,18 @@
 	<string>주행 경로 안내와 주행 중 위치 기록, 도로 상태 데이터 수집을 위해 위치가 필요합니다.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>주행 중 노면 상태 데이터를 수집하기 위해 동작 센서가 필요합니다.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>충격 이벤트 전후의 도로 상태를 확인하기 위해 주행 영상을 촬영합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>주행 영상 파일 저장을 위해 카메라 녹화 권한과 함께 마이크 권한이 필요할 수 있습니다.</string>
 	<key>R2DAPIBaseURL</key>
 	<string></string>
 	<key>KakaoNativeAppKey</key>
 	<string>$(KAKAO_NATIVE_APP_KEY)</string>
 	<key>iNaviAppKey</key>
-	<string>8bcae3ab93c9a5f6aa946f29ea441e564a794c2a</string>
+	<string>b5eefaf2b7c2c5a39849833e8f2666d3a7210a1c</string>
 	<key>R2DIMPSAppKey</key>
-	<string>8bcae3ab93c9a5f6aa946f29ea441e564a794c2a</string>
+	<string>b5eefaf2b7c2c5a39849833e8f2666d3a7210a1c</string>
 	<key>R2DIMPSBaseURL</key>
 	<string>https://imaps.inavi.com</string>
 	<key>R2DGoogleMapsAPIKey</key>

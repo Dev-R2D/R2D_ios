@@ -91,6 +91,8 @@ private actor FakeRouteRepository: IRouteRepository {
     location.simulate(.init(coordinate: .init(latitude: 37.5505, longitude: 127.041), speedMps: 5, heading: 0, mapMatchConfidence: 0.9))
     try await Task.sleep(for: .milliseconds(40))
     #expect(await repository.counts().1 == 1); #expect(coordinator.getSnapshot().selectedRoute?.id == "rerouted"); #expect(!coordinator.getSnapshot().isRerouting)
+    #expect(coordinator.getSnapshot().routeCorrectionNotice?.status == .corrected)
+    #expect(coordinator.getSnapshot().routeCorrectionNotice?.message.contains("새 경로") == true)
 }
 
 @Test @MainActor func coordinatorDoesNotAddRejectedGPSJumpToRideDistance() async throws {

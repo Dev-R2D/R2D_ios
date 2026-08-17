@@ -24,6 +24,19 @@ public protocol SensorCollector: AnyObject {
     func subscribe(_ listener: @escaping @Sendable (SensorChunk) -> Void) -> Unsubscribe
     func readiness() -> SensorReadiness
 }
+public protocol RideEvidenceRecording: AnyObject, Sendable {
+    func startRide(rideId: String, routeId: String?, startedAt: Date) async
+    func recordLocation(_ snapshot: LocationSnapshot, at date: Date) async
+    func processSensorChunk(_ chunk: SensorChunk) async
+    func stopRide() async -> RideEvidenceSummary?
+}
+public final class NoopRideEvidenceRecorder: RideEvidenceRecording, @unchecked Sendable {
+    public init() {}
+    public func startRide(rideId: String, routeId: String?, startedAt: Date) async {}
+    public func recordLocation(_ snapshot: LocationSnapshot, at date: Date) async {}
+    public func processSensorChunk(_ chunk: SensorChunk) async {}
+    public func stopRide() async -> RideEvidenceSummary? { nil }
+}
 public protocol SensorLogImporting: Sendable {
     func importRecording(from urls: [URL]) async throws -> SensorLogImportResult
 }

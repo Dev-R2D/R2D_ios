@@ -35,6 +35,18 @@ import R2DCore
     first.stop(); second.stop()
 }
 
+@Test func demoReplayUsesSensorLoggerSpeedsWhenAvailable() throws {
+    let tracker = DemoRouteLocationTracker(configuration: .init(playbackSpeed: 1, updateIntervalSec: 100))
+    try tracker.start(sessionId: "sensor-speed")
+    #expect(DemoNavigatorFixture.replaySpeedsMps.count == DemoNavigatorFixture.replayCoordinates.count)
+    #expect(abs(tracker.snapshot.speedMps - DemoNavigatorFixture.replaySpeedsMps[0]) < 0.001)
+    #expect(abs(tracker.snapshot.speedMps - 5) > 0.001)
+    tracker.seek(to: .risk)
+    let riskIndex = min(205, DemoNavigatorFixture.replaySpeedsMps.count - 1)
+    #expect(abs(tracker.snapshot.speedMps - DemoNavigatorFixture.replaySpeedsMps[riskIndex]) < 0.001)
+    tracker.stop()
+}
+
 @Test func demoJSONResourcesAreReadableAndValid() throws {
     #expect(DemoResourceBundle.containsAllResourcesIncludingPackageFallback())
     for name in DemoResourceBundle.resourceNames {

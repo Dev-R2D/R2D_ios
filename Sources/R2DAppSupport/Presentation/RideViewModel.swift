@@ -1,14 +1,17 @@
 import Combine
 import Foundation
 import R2DCore
+import R2DInfrastructure
 
 public struct ReplayPresentation: Equatable, Sendable {
     public let route: Route
     public let routes: [Route]
+    public let evidence: RideEvidenceSummary?
 
-    public init(route: Route, routes: [Route]) {
+    public init(route: Route, routes: [Route], evidence: RideEvidenceSummary? = nil) {
         self.route = route
         self.routes = routes
+        self.evidence = evidence
     }
 }
 
@@ -24,6 +27,7 @@ public final class RideViewModel: ObservableObject {
     @Published public private(set) var selectedDestination: PlaceSearchResult?
     @Published public private(set) var routeSearchMessage: String?
     @Published public private(set) var matchedPointCount = 0
+    @Published public private(set) var matchedTrace: [MatchedRoadPoint] = []
     @Published public private(set) var isSearchingPlaces = false
     @Published public private(set) var isSearchingRoute = false
     @Published public private(set) var selectedRouteOption = "pm"
@@ -116,7 +120,15 @@ public final class RideViewModel: ObservableObject {
             do {
                 let originResults: [PlaceSearchResult]
                 let origin: PlaceSearchResult?
-                if isCurrentLocationQuery(originQuery) {
+                if let coordinate = Self.coordinateQuery(originQuery) {
+                    let result = Self.coordinatePlaceResult(
+                        id: "sensor-logger-origin",
+                        title: "Sensor Logger 출발",
+                        coordinate: coordinate
+                    )
+                    originResults = [result]
+                    origin = result
+                } else if isCurrentLocationQuery(originQuery) {
                     guard let currentOrigin = await currentLocationOrigin() else {
                         isSearchingRoute = false
                         return
@@ -128,8 +140,20 @@ public final class RideViewModel: ObservableObject {
                     origin = originResults.first
                 }
 
-                let destinationResults = try await placeSearch.geocode(destinationQuery, near: origin?.coordinate ?? state.location.coordinate)
-                let destination = destinationResults.first
+                let destinationResults: [PlaceSearchResult]
+                let destination: PlaceSearchResult?
+                if let coordinate = Self.coordinateQuery(destinationQuery) {
+                    let result = Self.coordinatePlaceResult(
+                        id: "sensor-logger-destination",
+                        title: "Sensor Logger 도착",
+                        coordinate: coordinate
+                    )
+                    destinationResults = [result]
+                    destination = result
+                } else {
+                    destinationResults = try await placeSearch.geocode(destinationQuery, near: origin?.coordinate ?? state.location.coordinate)
+                    destination = destinationResults.first
+                }
 
                 guard let origin, let destination else {
                     routeSearchMessage = "주소 검색 결과가 없습니다."
@@ -164,18 +188,20 @@ public final class RideViewModel: ObservableObject {
             return
         }
         isSearchingRoute = true
-        routeSearchMessage = "iMPS PM 후보 경로 3개 탐색 중..."
+        routeSearchMessage = "iMPS 후보 경로 3개 탐색 중..."
         Task {
             do {
                 try await coordinator.searchRouteOptions(origin: origin.coordinate, destination: destination.coordinate, options: Self.comparisonRouteOptions)
                 let snapshot = coordinator.getSnapshot()
-                if let selected = snapshot.routes.first(where: { $0.providerOption == selectedRouteOption }) ?? snapshot.routes.first {
+                if let selected = snapshot.routes.first(where: { $0.providerOption == "sensor_logger" })
+                    ?? snapshot.routes.first(where: { $0.providerOption == selectedRouteOption })
+                    ?? snapshot.routes.first {
                     coordinator.selectRoute(selected)
                     let count = coordinator.getSnapshot().routes.count
                     if let duplicateMessage = duplicateRouteMessage(for: snapshot.routes) {
-                        routeSearchMessage = "PM 후보 경로 \(count)개 표시: \(summaryText(for: selected))\n\(duplicateMessage)"
+                        routeSearchMessage = "후보 경로 \(count)개 표시: \(summaryText(for: selected))\n\(duplicateMessage)"
                     } else {
-                        routeSearchMessage = "PM 후보 경로 \(count)개 표시: \(summaryText(for: selected))"
+                        routeSearchMessage = "후보 경로 \(count)개 표시: \(summaryText(for: selected))"
                     }
                 } else {
                     routeSearchMessage = "경로 결과가 없습니다."
@@ -196,9 +222,14 @@ public final class RideViewModel: ObservableObject {
         Task {
             do {
                 let matched = try await mapMatching.matchTrace(route.polyline)
+                matchedTrace = matched
                 matchedPointCount = matched.count
-                routeSearchMessage = "맵매칭 완료: \(matched.count)개 지점 복원"
+                let changedCount = matched.filter {
+                    Self.distance(from: $0.original, to: $0.matched) >= 3
+                }.count
+                routeSearchMessage = "맵매칭 완료: \(matched.count)개 지점 복원 · 보정 \(changedCount)개"
             } catch {
+                matchedTrace = []
                 routeSearchMessage = "맵매칭 실패: \(error.localizedDescription)"
             }
         }
@@ -208,13 +239,16 @@ public final class RideViewModel: ObservableObject {
         if state.selectedRoute == nil, let first = state.routes.first {
             coordinator.selectRoute(first)
         }
-        guard state.selectedRoute != nil else {
+        guard let route = state.selectedRoute else {
             routeSearchMessage = "먼저 경로 탐색을 완료해 주세요."
             return
         }
         do {
             if state.session == nil {
                 _ = try coordinator.prepare()
+            }
+            if let start = route.polyline.first {
+                alignCurrentLocationToOrigin(start)
             }
             beginTraceRecording()
             do {
@@ -280,7 +314,7 @@ public final class RideViewModel: ObservableObject {
                             Turn(coordinate: first, instruction: "Sensor Logger 수집 출발 지점", distance: 0),
                             Turn(coordinate: last, instruction: "Sensor Logger 수집 도착 지점", distance: 3200)
                         ],
-                        riskCells: []
+                        riskCells: Self.replayRiskCells(for: nil, coordinates: result.extractedCoordinates)
                     )
                     coordinator.selectRoute(route)
                     coordinator.injectExternalLocation(LocationSnapshot(coordinate: first, speedMps: 4.5, heading: 90, mapMatchConfidence: 0.95))
@@ -328,7 +362,7 @@ public final class RideViewModel: ObservableObject {
 
     public static func routeDurationLabel(for route: Route) -> String {
         if isPMRoute(route.providerOption) {
-            return "PM 예상 \(durationText(seconds: route.totalDuration))"
+            return "예상 \(durationText(seconds: route.totalDuration))"
         }
         return "자전거 환산 \(bicycleDurationText(distanceMeters: route.totalDistance))"
     }
@@ -358,6 +392,12 @@ public final class RideViewModel: ObservableObject {
     }
 
     public static func routeSearchErrorMessage(_ error: Error, origin: Coordinate, destination: Coordinate) -> String {
+        if error as? IMPSRepositoryError == .capacityExceeded {
+            return """
+            경로 탐색 실패: iMPS API 호출 한도를 초과했습니다.
+            잠시 후 다시 시도하거나 Google Cloud/iMPS 키의 사용량 제한을 확인해 주세요.
+            """
+        }
         if error as? RouteRepositoryError == .invalidRoute {
             return """
             경로 탐색 실패: iMPS가 경로를 만들 수 없습니다.
@@ -379,6 +419,20 @@ public final class RideViewModel: ObservableObject {
     public func selectDemoDistance(_ distanceMeters: Double?) {
         selectedDemoDistanceMeters = distanceMeters
         routeSearchMessage = "데모 주행거리 선택: \(demoDistanceLabel)"
+    }
+
+    public func simulateOffRouteCorrection() {
+        guard isDemoNavigating || state.session?.state == .active || state.session?.state == .paused else {
+            routeSearchMessage = "주행 시작 후 경로 이탈 데모를 실행할 수 있습니다."
+            return
+        }
+        guard let demoReplayController else {
+            routeSearchMessage = "데모 위치 컨트롤러가 연결되지 않았습니다."
+            return
+        }
+        demoReplayController.seek(to: .reroute)
+        routeSearchMessage = "경로 이탈 데모: 현재 위치가 경로 밖으로 이동했습니다."
+        sensorImportMessage = "경로 이탈 감지 후 현재 위치 기준 새 경로를 재탐색합니다."
     }
 
     public var demoDistanceLabel: String {
@@ -445,20 +499,21 @@ public final class RideViewModel: ObservableObject {
 
         demoNavigationTask = Task { [weak self] in
             guard let self else { return }
-            for index in traceCoordinates.indices {
-                if Task.isCancelled { return }
-                let current = traceCoordinates[index]
-                let next = traceCoordinates[min(index + 1, traceCoordinates.count - 1)]
-                let heading = Self.heading(from: current, to: next)
-                await MainActor.run {
-                    self.coordinator.injectExternalLocation(
-                        LocationSnapshot(
-                            coordinate: current,
-                            speedMps: 16.0,
-                            heading: heading,
-                            mapMatchConfidence: 0.98
-                        )
-                    )
+	            for index in traceCoordinates.indices {
+	                if Task.isCancelled { return }
+	                let current = traceCoordinates[index]
+	                let next = traceCoordinates[min(index + 1, traceCoordinates.count - 1)]
+	                let heading = Self.heading(from: current, to: next)
+	                let speedMps = Self.demoReplaySpeedMps(at: index)
+	                await MainActor.run {
+	                    self.coordinator.injectExternalLocation(
+	                        LocationSnapshot(
+	                            coordinate: current,
+	                            speedMps: speedMps,
+	                            heading: heading,
+	                            mapMatchConfidence: 0.98
+	                        )
+	                    )
                 }
                 try? await Task.sleep(nanoseconds: 120_000_000)
             }
@@ -480,6 +535,10 @@ public final class RideViewModel: ObservableObject {
         guard let baseRoute = state.selectedRoute ?? state.routes.first else { return }
         let replayCoordinates = recordedTrace.count >= 2 ? recordedTrace : clippedCoordinates(for: baseRoute, maxDistance: displayedDistance(for: baseRoute))
         guard replayCoordinates.count >= 2 else { return }
+        let evidence = coordinator.getSnapshot().latestRideEvidence
+        let riskCells = Self.replayRiskCells(for: baseRoute, coordinates: replayCoordinates)
+            .filter { Self.riskCell($0, isNear: replayCoordinates) }
+            + Self.evidenceRiskCells(from: evidence)
 
         let replayRoute = Route(
             id: "\(baseRoute.id)-replay",
@@ -492,9 +551,67 @@ public final class RideViewModel: ObservableObject {
             totalTaxiFare: baseRoute.totalTaxiFare,
             isHighWay: baseRoute.isHighWay,
             turnList: baseRoute.turnList,
-            riskCells: baseRoute.riskCells
+            riskCells: riskCells
         )
-        pendingReplay = ReplayPresentation(route: replayRoute, routes: [replayRoute])
+        pendingReplay = ReplayPresentation(route: replayRoute, routes: [replayRoute], evidence: evidence)
+    }
+
+    private static func evidenceRiskCells(from evidence: RideEvidenceSummary?) -> [RiskCell] {
+        guard let evidence else { return [] }
+        return evidence.events.compactMap { event in
+            guard let coordinate = event.coordinate else { return nil }
+            let score = max(40, min(72, 72 - event.accelerationPeak * 7 - event.jerk * 1.5))
+            let confidence = max(0.55, min(0.95, 0.58 + event.accelerationPeak / 10 + event.jerk / 40))
+            let geometry = String(format: "POINT(%.7f %.7f)", coordinate.longitude, coordinate.latitude)
+            return RiskCell(id: "evidence-\(event.id)", geometry: geometry, riskScore: score, confidence: confidence)
+        }
+    }
+
+    private static func replayRiskCells(for route: Route?, coordinates: [Coordinate]) -> [RiskCell] {
+        if let cells = route?.riskCells, !cells.isEmpty {
+            return cells
+        }
+        guard let sensorRoute = DemoNavigatorFixture.sensorRoute, !sensorRoute.riskCells.isEmpty else {
+            return []
+        }
+        guard routeOverlapsSensorLog(coordinates, sensorRoute: sensorRoute) else {
+            return []
+        }
+        return sensorRoute.riskCells
+    }
+
+    private static func routeOverlapsSensorLog(_ coordinates: [Coordinate], sensorRoute: Route) -> Bool {
+        guard let first = coordinates.first, let last = coordinates.last,
+              let sensorFirst = sensorRoute.polyline.first, let sensorLast = sensorRoute.polyline.last
+        else { return false }
+        let endpointTolerance = 700.0
+        if distance(from: first, to: sensorFirst) <= endpointTolerance,
+           distance(from: last, to: sensorLast) <= endpointTolerance {
+            return true
+        }
+        let samples = coordinates.prefix(8) + coordinates.suffix(8)
+        let nearSampleCount = samples.filter { coordinate in
+            sensorRoute.polyline.contains { distance(from: coordinate, to: $0) <= 120 }
+        }.count
+        return nearSampleCount >= 3
+    }
+
+    private static func riskCell(_ cell: RiskCell, isNear coordinates: [Coordinate]) -> Bool {
+        guard let coordinate = coordinate(fromWKTPoint: cell.geometry) else { return true }
+        return coordinates.contains { distance(from: $0, to: coordinate) <= 45 }
+    }
+
+    private static func coordinate(fromWKTPoint geometry: String) -> Coordinate? {
+        let trimmed = geometry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.uppercased().hasPrefix("POINT") else { return nil }
+        let values = trimmed
+            .replacingOccurrences(of: "POINT", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "(", with: " ")
+            .replacingOccurrences(of: ")", with: " ")
+            .split(whereSeparator: { $0 == " " || $0 == "," })
+            .compactMap { Double($0) }
+        guard values.count >= 2 else { return nil }
+        return Coordinate(latitude: values[1], longitude: values[0])
     }
 
     private func clippedCoordinates(for route: Route, maxDistance: Double) -> [Coordinate] {
@@ -524,11 +641,17 @@ public final class RideViewModel: ObservableObject {
         return output
     }
 
-    private func replayDistance(for coordinates: [Coordinate]) -> Double {
-        zip(coordinates, coordinates.dropFirst()).reduce(0) { partial, pair in
-            partial + Self.distance(from: pair.0, to: pair.1)
-        }
-    }
+	    private func replayDistance(for coordinates: [Coordinate]) -> Double {
+	        zip(coordinates, coordinates.dropFirst()).reduce(0) { partial, pair in
+	            partial + Self.distance(from: pair.0, to: pair.1)
+	        }
+	    }
+
+	    private static func demoReplaySpeedMps(at index: Int) -> Double {
+	        let speeds = DemoNavigatorFixture.replaySpeedsMps
+	        guard !speeds.isEmpty else { return 0 }
+	        return speeds[max(0, min(index, speeds.count - 1))]
+	    }
 
     private static func distance(from start: Coordinate, to end: Coordinate) -> Double {
         let dy = (end.latitude - start.latitude) * 111_320
@@ -553,11 +676,11 @@ public final class RideViewModel: ObservableObject {
         case "short_distance_priority": return "차량 최단 거리"
         case "real_traffic_freeroad": return "차량 무료 도로"
         case "motorcycle": return "이륜차"
-        case "pm", "pm_recommendation": return "PM 추천 경로"
-        case "pm_short_distance_priority": return "PM 최단 거리"
+        case "pm", "pm_recommendation": return "최소시간"
+        case "pm_short_distance_priority": return "최단거리"
         case "pm_easy_way": return "PM 편한 경로"
-        case "pm_time_priority": return "PM 최소 시간"
-        case "pm_main_road": return "PM 큰길 위주"
+        case "pm_time_priority": return "최소시간"
+        case "pm_main_road": return "큰길 위주"
         default: return option
         }
     }
@@ -629,6 +752,24 @@ public final class RideViewModel: ObservableObject {
             }
             return
         }
+        if let coordinate = Self.coordinateQuery(trimmed) {
+            let result = Self.coordinatePlaceResult(
+                id: target == .origin ? "coordinate-origin" : "coordinate-destination",
+                title: target == .origin ? "좌표 출발지" : "좌표 도착지",
+                coordinate: coordinate
+            )
+            switch target {
+            case .origin:
+                originResults = [result]
+                selectedOrigin = result
+                alignCurrentLocationToOrigin(coordinate)
+            case .destination:
+                destinationResults = [result]
+                selectedDestination = result
+            }
+            routeSearchMessage = "\(result.title) 선택: \(Self.coordinateText(coordinate))"
+            return
+        }
         isSearchingPlaces = true
         routeSearchMessage = "주소 검색 중..."
         Task {
@@ -653,6 +794,32 @@ public final class RideViewModel: ObservableObject {
     private func isCurrentLocationQuery(_ query: String) -> Bool {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty || normalized == "현재 위치" || normalized == "현재위치" || normalized == "내 위치" || normalized == "내위치" || normalized == "current location"
+    }
+
+    private static func coordinateQuery(_ query: String) -> Coordinate? {
+        let separators = CharacterSet(charactersIn: ", ")
+        let parts = query
+            .split { scalar in
+                scalar.unicodeScalars.allSatisfy { separators.contains($0) }
+            }
+            .compactMap { Double($0) }
+        guard parts.count == 2 else { return nil }
+        let first = parts[0]
+        let second = parts[1]
+        if (-90...90).contains(first), (-180...180).contains(second) {
+            return Coordinate(latitude: first, longitude: second)
+        }
+        return nil
+    }
+
+    private static func coordinatePlaceResult(id: String, title: String, coordinate: Coordinate) -> PlaceSearchResult {
+        .init(
+            id: id,
+            title: title,
+            address: String(format: "GPS %.7f, %.7f", coordinate.latitude, coordinate.longitude),
+            coordinate: coordinate,
+            source: "sensor-logger"
+        )
     }
 
     private func currentLocationOrigin() async -> PlaceSearchResult? {

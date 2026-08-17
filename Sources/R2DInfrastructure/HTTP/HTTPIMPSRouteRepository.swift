@@ -137,6 +137,21 @@ public actor HTTPIMPSRouteRepository: IRouteRepository {
 
     private func decode(_ data: Data, origin: Coordinate, destination: Coordinate, requestedOption: String? = nil) throws -> Route {
         let decoder = JSONDecoder()
+        if let failure = try? decoder.decode(IMPSRouteHeaderResponse.self, from: data),
+           !failure.header.isSuccessful {
+            NSLog(
+                "R2D iMPS route API failed: option=%@ code=%@ message=%@ body=%@",
+                requestedOption ?? "default",
+                failure.header.resultCode.map(String.init) ?? "nil",
+                failure.header.resultMessage ?? "nil",
+                String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            )
+            if failure.header.resultCode == 302 || failure.header.resultMessage?.localizedCaseInsensitiveContains("Limit Exceeded") == true {
+                throw IMPSRepositoryError.capacityExceeded
+            }
+            throw RouteRepositoryError.invalidRoute
+        }
+
         let payload: IMPSRouteResponse
         do {
             payload = try decoder.decode(IMPSRouteResponse.self, from: data)
@@ -221,6 +236,10 @@ public actor HTTPIMPSRouteRepository: IRouteRepository {
             option ?? "default"
         )
     }
+}
+
+private struct IMPSRouteHeaderResponse: Decodable {
+    let header: IMPSRouteResponse.Header
 }
 
 private struct PedestrianRouteRequest: Encodable {

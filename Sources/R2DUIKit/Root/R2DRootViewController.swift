@@ -28,7 +28,7 @@ public final class R2DRootViewController: UIViewController {
     private let destinationField = UITextField()
     private let searchOriginButton = UIButton(type: .system)
     private let searchDestinationButton = UIButton(type: .system)
-    private let routeOptionControl = UISegmentedControl(items: ["PM 추천", "큰길", "최단"])
+    private let routeOptionControl = UISegmentedControl(items: ["최소시간", "큰길 위주", "최단거리"])
     private let demoDistanceControl = UISegmentedControl(items: ["1km", "3km", "5km", "전체"])
     private let routeSearchButton = UIButton(type: .system)
     private let mapMatchButton = UIButton(type: .system)
@@ -41,10 +41,12 @@ public final class R2DRootViewController: UIViewController {
     private let setupPanel = UIStackView()
     private let startButton = UIButton(type: .system)
     private let finishButton = UIButton(type: .system)
-    private let gameButton = UIButton(type: .system)
+    private let offRouteDemoButton = UIButton(type: .system)
+    private let complaintButton = UIButton(type: .system)
     private var embeddedMapController: R2DMapViewController?
     private var embeddedRouteID: String?
-    private var isPresentingReplay = false
+    private var didTriggerAutoShowMap = false
+    private var didPresentAutoShowMap = false
 
     public init(model: RideViewModel) {
         self.model = model
@@ -62,6 +64,7 @@ public final class R2DRootViewController: UIViewController {
         bindModel()
         observeKeyboard()
         model.bootstrap()
+        triggerAutoShowMapIfNeeded()
     }
 
     deinit {
@@ -128,8 +131,8 @@ public final class R2DRootViewController: UIViewController {
         configureTextField(destinationField, placeholder: "도착지 주소")
         originField.delegate = self
         destinationField.delegate = self
-        originField.text = "서울특별시 종로구 종로3가"
-        destinationField.text = "경기도 성남시 분당구 판교역로 240"
+        originField.text = "37.1848896, 127.1043303"
+        destinationField.text = "37.2005333, 127.0964250"
 
         configureButton(searchOriginButton, title: "출발 검색", color: .systemBlue, action: #selector(searchOrigin))
         configureButton(searchDestinationButton, title: "도착 검색", color: .systemBlue, action: #selector(searchDestination))
@@ -144,7 +147,8 @@ public final class R2DRootViewController: UIViewController {
 
         configureButton(startButton, title: "주행 시작", color: .systemGreen, action: #selector(startRide))
         configureButton(finishButton, title: "주행 종료", color: .systemRed, action: #selector(finishRide))
-        configureButton(gameButton, title: "3D 리플레이", color: .systemIndigo, action: #selector(openReplay))
+        configureButton(offRouteDemoButton, title: "경로 이탈 데모", color: .systemOrange, action: #selector(runOffRouteDemo))
+        configureButton(complaintButton, title: "도로 민원 신고", color: .systemIndigo, action: #selector(openRoadComplaint))
 
         let buttonStack = UIStackView(arrangedSubviews: [startButton, finishButton])
         buttonStack.axis = .horizontal
@@ -193,8 +197,9 @@ public final class R2DRootViewController: UIViewController {
         navigationPanel.addArrangedSubview(navigationMetricStack)
         navigationPanel.addArrangedSubview(riskWarningLabel)
         navigationPanel.addArrangedSubview(sessionNoticeLabel)
+        navigationPanel.addArrangedSubview(offRouteDemoButton)
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, statusLabel, diagnosticsLabel, locationStatusLabel, navigationPanel, setupPanel, mapPreview, buttonStack, gameButton])
+        let stack = UIStackView(arrangedSubviews: [titleLabel, statusLabel, diagnosticsLabel, locationStatusLabel, navigationPanel, setupPanel, mapPreview, buttonStack, complaintButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -223,7 +228,7 @@ public final class R2DRootViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
             mapPreview.heightAnchor.constraint(equalToConstant: 360),
             startButton.heightAnchor.constraint(equalToConstant: 48),
-            gameButton.heightAnchor.constraint(equalToConstant: 48),
+            complaintButton.heightAnchor.constraint(equalToConstant: 48),
             searchOriginButton.widthAnchor.constraint(equalToConstant: 96),
             searchDestinationButton.widthAnchor.constraint(equalToConstant: 96),
             originField.heightAnchor.constraint(equalToConstant: 44),
@@ -318,6 +323,29 @@ public final class R2DRootViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 
+    private func triggerAutoShowMapIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("R2D_AUTOSHOW_MAP"), !didTriggerAutoShowMap else { return }
+        didTriggerAutoShowMap = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            self.model.searchRoute(originQuery: self.originField.text ?? "", destinationQuery: self.destinationField.text ?? "")
+        }
+    }
+
+    private func presentAutoShowMapIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("R2D_AUTOSHOW_MAP"),
+              !didPresentAutoShowMap,
+              !model.state.routes.isEmpty,
+              presentedViewController == nil,
+              view.window != nil
+        else { return }
+        didPresentAutoShowMap = true
+        model.startSelectedRoute()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.openRideMap()
+        }
+    }
+
     private func bindModel() {
         model.$state
             .receive(on: DispatchQueue.main)
@@ -360,10 +388,24 @@ public final class R2DRootViewController: UIViewController {
         model.$pendingReplay
             .receive(on: DispatchQueue.main)
             .sink { [weak self] replay in
-                guard let self, let replay else { return }
-                self.presentReplay(replay)
+                guard let replay else { return }
+                self?.presentRideReport(replay)
             }
             .store(in: &cancellables)
+
+    }
+
+    private func presentRideReport(_ replay: ReplayPresentation) {
+        model.consumePendingReplay()
+        #if canImport(WebKit)
+        let controller = R2DReplayViewController(route: replay.route, routes: replay.routes, autoPlay: false)
+        let navigation = UINavigationController(rootViewController: controller)
+        if let presentedViewController {
+            presentedViewController.present(navigation, animated: true)
+        } else {
+            present(navigation, animated: true)
+        }
+        #endif
     }
 
     private func render(_ state: ActiveRideState) {
@@ -376,6 +418,7 @@ public final class R2DRootViewController: UIViewController {
             routeDetailLabel.text = Self.routeDetailText(for: route, routeCount: state.routes.count)
             routeDetailLabel.isHidden = false
             installEmbeddedMapIfNeeded(route: route, routes: state.routes)
+            presentAutoShowMapIfNeeded()
         } else {
             routeLabel.text = "출발지와 도착지를 입력한 뒤 경로 탐색을 눌러 주세요."
             routeDetailLabel.isHidden = true
@@ -386,10 +429,11 @@ public final class R2DRootViewController: UIViewController {
         setupPanel.isHidden = isNavigating
         navigationPanel.isHidden = !isNavigating
         diagnosticsLabel.isHidden = isNavigating
-        gameButton.isHidden = isNavigating
+        complaintButton.isHidden = isNavigating
         if isNavigating {
             renderNavigation(state)
         }
+        offRouteDemoButton.isHidden = !(model.featureFlags.demoControlsEnabled && isNavigating)
 
         startButton.isEnabled = !isNavigating
         finishButton.isEnabled = isNavigating
@@ -414,10 +458,10 @@ public final class R2DRootViewController: UIViewController {
             navigationInstructionLabel.text = "주의 구간 접근"
             navigationMetricsLabel.text = "\(Self.warningSeverityText(warning.severity)) · \(Self.formatDistance(warning.distanceM)) 앞 · 신뢰도 \(Int(warning.confidence * 100))%"
             riskWarningLabel.text = "안전 경고: \(Self.riskStateText(warning.riskState))"
-        } else if state.isRerouting {
-            navigationInstructionLabel.text = "경로 재탐색 중"
-            navigationMetricsLabel.text = "현재 위치 기준으로 새 경로를 계산하고 있습니다."
-            riskWarningLabel.text = "안전 경고 없음"
+        } else if let correction = state.routeCorrectionNotice {
+            navigationInstructionLabel.text = Self.routeCorrectionTitle(correction.status)
+            navigationMetricsLabel.text = correction.message
+            riskWarningLabel.text = correction.status == .failed ? "경로 안내: 수동 재탐색 필요" : "경로 안내: 현재 위치 기준 정정"
         } else if let instruction = state.nextInstruction {
             navigationInstructionLabel.text = instruction.title
             navigationMetricsLabel.text = "다음 안내까지 \(Self.formatDistance(instruction.distanceM))"
@@ -462,7 +506,7 @@ public final class R2DRootViewController: UIViewController {
         if routeCount > 1 {
             parts.append("후보 \(routeCount)개")
         }
-        parts.append(RideViewModel.isPMRoute(route.providerOption) ? "도보/PM API \(formatDuration(route.totalDuration))" : "차량 API \(formatDuration(route.totalDuration))")
+        parts.append(RideViewModel.isPMRoute(route.providerOption) ? "자전거/PM 경로 \(formatDuration(route.totalDuration))" : "차량 API \(formatDuration(route.totalDuration))")
         if let tollFee = route.tollFee {
             parts.append("통행료 \(formatWon(tollFee))")
         }
@@ -504,11 +548,11 @@ public final class R2DRootViewController: UIViewController {
         case "short_distance_priority": return "차량 최단거리"
         case "time_priority": return "최소시간"
         case "motorcycle": return "이륜차"
-        case "pm", "pm_recommendation": return "PM 추천"
-        case "pm_short_distance_priority": return "PM 최단"
+        case "pm", "pm_recommendation": return "최소시간"
+        case "pm_short_distance_priority": return "최단거리"
         case "pm_easy_way": return "PM 편한 길"
-        case "pm_time_priority": return "PM 최소시간"
-        case "pm_main_road": return "PM 큰길"
+        case "pm_time_priority": return "최소시간"
+        case "pm_main_road": return "큰길 위주"
         case "highway_priority": return "고속도로"
         case "recommendation": return "추천 경로"
         case let value?: return value
@@ -532,6 +576,19 @@ public final class R2DRootViewController: UIViewController {
         case .confirmedDamage: return "파손 확정"
         case .repairPending: return "보수 대기"
         case .restricted: return "제한 구간"
+        }
+    }
+
+    private static func routeCorrectionTitle(_ status: RouteCorrectionNotice.Status) -> String {
+        switch status {
+        case .offRoute:
+            return "경로 이탈 감지"
+        case .rerouting:
+            return "경로 재탐색 중"
+        case .corrected:
+            return "경로 정정 완료"
+        case .failed:
+            return "경로 정정 실패"
         }
     }
 
@@ -595,23 +652,50 @@ public final class R2DRootViewController: UIViewController {
     @objc private func startRide() {
         model.startSelectedRoute()
         guard model.state.selectedRoute ?? model.state.routes.first != nil else { return }
-        openMap()
+        openRideMap()
     }
 
     @objc private func finishRide() {
         model.finishRide()
     }
 
+    @objc private func runOffRouteDemo() {
+        model.simulateOffRouteCorrection()
+    }
+
     @objc private func openMap() {
+        let selectedRoute = model.state.selectedRoute ?? model.state.routes.first
         let map = R2DMapViewController(
-            route: model.state.selectedRoute ?? model.state.routes.first,
-            routes: model.state.routes,
+            route: selectedRoute,
+            routes: selectedRoute.map { [$0] } ?? [],
+            riskRoutes: model.state.routes,
+            matchedTrace: model.matchedTrace,
             initialCurrentLocation: model.state.location.coordinate,
             followsUserLocation: true,
-            rideStateProvider: model.coordinator
-        ) { [weak self] route in
-            self?.model.selectRoute(id: route.id)
-        }
+            rideStateProvider: model.coordinator,
+            onRouteSelected: { [weak self] route in
+                self?.model.selectRoute(id: route.id)
+            }
+        )
+        let navigation = UINavigationController(rootViewController: map)
+        present(navigation, animated: true)
+    }
+
+    private func openRideMap() {
+        guard let selectedRoute = model.state.selectedRoute ?? model.state.routes.first else { return }
+        let routeStart = selectedRoute.polyline.first
+        let map = R2DMapViewController(
+            route: selectedRoute,
+            routes: [selectedRoute],
+            riskRoutes: model.state.routes,
+            matchedTrace: model.matchedTrace,
+            initialCurrentLocation: routeStart,
+            followsUserLocation: true,
+            rideStateProvider: model.coordinator,
+            onOffRouteDemo: { [weak self] in
+                self?.model.simulateOffRouteCorrection()
+            }
+        )
         let navigation = UINavigationController(rootViewController: map)
         present(navigation, animated: true)
     }
@@ -633,12 +717,14 @@ public final class R2DRootViewController: UIViewController {
         let controller = R2DMapViewController(
             route: route,
             routes: routes,
+            matchedTrace: model.matchedTrace,
             initialCurrentLocation: model.state.location.coordinate,
             followsUserLocation: isNavigating,
-            rideStateProvider: model.coordinator
-        ) { [weak self] route in
-            self?.model.selectRoute(id: route.id)
-        }
+            rideStateProvider: model.coordinator,
+            onRouteSelected: { [weak self] route in
+                self?.model.selectRoute(id: route.id)
+            }
+        )
         addChild(controller)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
         mapPreview.insertSubview(controller.view, at: 0)
@@ -653,27 +739,10 @@ public final class R2DRootViewController: UIViewController {
         embeddedRouteID = previewID
     }
 
-    @objc private func openReplay() {
-        guard let route = model.state.selectedRoute ?? model.state.routes.first else {
-            searchMessageLabel.text = "먼저 경로를 탐색하면 3D 리플레이를 볼 수 있어요."
-            return
-        }
-        presentReplay(.init(route: route, routes: model.state.routes))
-    }
-
-    private func presentReplay(_ payload: ReplayPresentation) {
-        presentReplay(payload, autoPlay: false)
-    }
-
-    private func presentReplay(_ payload: ReplayPresentation, autoPlay: Bool) {
-        guard !isPresentingReplay else { return }
-        isPresentingReplay = true
-        let replay = R2DReplayViewController(route: payload.route, routes: payload.routes, autoPlay: autoPlay)
-        let navigation = UINavigationController(rootViewController: replay)
-        navigation.presentationController?.delegate = self
-        present(navigation, animated: true) { [weak self] in
-            self?.model.consumePendingReplay()
-        }
+    @objc private func openRoadComplaint() {
+        let controller = RoadComplaintViewController(initialCoordinate: model.state.location.coordinate ?? model.state.selectedRoute?.polyline.first ?? model.state.routes.first?.polyline.first)
+        let navigation = UINavigationController(rootViewController: controller)
+        present(navigation, animated: true)
     }
 
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
@@ -701,9 +770,4 @@ extension R2DRootViewController: UITextFieldDelegate {
     }
 }
 
-extension R2DRootViewController: UIAdaptivePresentationControllerDelegate {
-    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        isPresentingReplay = false
-    }
-}
 #endif

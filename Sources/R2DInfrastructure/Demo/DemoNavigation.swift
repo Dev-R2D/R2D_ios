@@ -4,15 +4,17 @@ import R2DCore
 public struct DemoReplayConfiguration: Sendable {
     public let playbackSpeed: Double, updateIntervalSec: TimeInterval
     public let injectOffRoute: Bool, injectGPSJump: Bool, loop: Bool
-    public init(playbackSpeed: Double = 2.5, updateIntervalSec: TimeInterval = 0.5, injectOffRoute: Bool = false, injectGPSJump: Bool = false, loop: Bool = false) {
+    public init(playbackSpeed: Double = 1.0, updateIntervalSec: TimeInterval = 1.0, injectOffRoute: Bool = false, injectGPSJump: Bool = false, loop: Bool = false) {
         self.playbackSpeed = playbackSpeed; self.updateIntervalSec = updateIntervalSec; self.injectOffRoute = injectOffRoute; self.injectGPSJump = injectGPSJump; self.loop = loop
     }
 }
 
 public enum DemoNavigatorFixture {
+    static let sensorSamples = SensorLoggerDemoRoute.loadSamples()
+    public static let sensorRoute = SensorLoggerDemoRoute.load()
     public static let sourceRoad = try? HwaseongBikeRoadCatalog.loadBundled().preferredDemoRoad
-    public static let origin = sourceRoad?.start ?? Coordinate(latitude: 37.2358981701, longitude: 127.035530669)
-    public static let destination = sourceRoad?.end ?? Coordinate(latitude: 37.2188446551, longitude: 127.0564212205)
+    public static let origin = sensorRoute?.polyline.first ?? sourceRoad?.start ?? Coordinate(latitude: 37.2358981701, longitude: 127.035530669)
+    public static let destination = sensorRoute?.polyline.last ?? sourceRoad?.end ?? Coordinate(latitude: 37.2188446551, longitude: 127.0564212205)
     public static let dongtanWoncheonPolyline: [Coordinate] = (0...8).map { step in
         let ratio = Double(step) / 8
         let start = Coordinate(latitude: 37.235898, longitude: 127.035530)
@@ -37,7 +39,7 @@ public enum DemoNavigatorFixture {
         return .init(latitude: start.latitude + (end.latitude - start.latitude) * ratio + curve, longitude: start.longitude + (end.longitude - start.longitude) * ratio + curve)
     }
 
-    public static let safePolyline: [Coordinate] = dongtanWoncheonPolyline
+    public static let safePolyline: [Coordinate] = sensorSamples.count >= 2 ? sensorSamples.map(\.coordinate) : (sensorRoute?.polyline ?? dongtanWoncheonPolyline)
 
     public static let routes: [Route] = [
         makeRoute(id: "demo-safe", polyline: dongtanWoncheonPolyline, duration: 540, title: "동탄원천로"),
@@ -56,6 +58,9 @@ public enum DemoNavigatorFixture {
         ], isSimulated: true)
     }()
     public static let replayCoordinates: [Coordinate] = {
+        if sensorSamples.count >= 2 {
+            return sensorSamples.map(\.coordinate)
+        }
         var result: [Coordinate] = []
         for index in 0..<(safePolyline.count - 1) {
             let a = safePolyline[index], b = safePolyline[index + 1]
@@ -63,6 +68,12 @@ public enum DemoNavigatorFixture {
         }
         result.append(safePolyline.last ?? destination)
         return result
+    }()
+    public static let replaySpeedsMps: [Double] = {
+        if sensorSamples.count >= 2 {
+            return sensorSamples.map(\.speedMps)
+        }
+        return Array(repeating: 5, count: replayCoordinates.count)
     }()
     private static func makeRoute(id: String, polyline: [Coordinate], duration: TimeInterval, title: String) -> Route {
         let distance = zip(polyline, polyline.dropFirst()).reduce(0) { $0 + demoDistance($1.0, $1.1) }
@@ -73,7 +84,14 @@ public enum DemoNavigatorFixture {
 
 public actor DemoRouteRepository: IRouteRepository {
     public init() {}
-    public func searchRoute(origin: Coordinate, destination: Coordinate) async throws -> [Route] { DemoNavigatorFixture.routes }
+    public func searchRoute(origin: Coordinate, destination: Coordinate) async throws -> [Route] {
+        if let sensorRoute = DemoNavigatorFixture.sensorRoute, isNearSensorRoute(origin, destination, route: sensorRoute) {
+            return [sensorRoute] + DemoNavigatorFixture.routes.map { route in
+                route.withRiskCells(sensorRoute.riskCells)
+            }
+        }
+        return DemoNavigatorFixture.routes
+    }
     public func refreshRoute(_ route: Route, from currentLocation: Coordinate) async throws -> Route {
         let destination = route.polyline.last ?? DemoNavigatorFixture.destination
         let middle = Coordinate(latitude: (currentLocation.latitude + destination.latitude) / 2, longitude: (currentLocation.longitude + destination.longitude) / 2)
@@ -83,20 +101,54 @@ public actor DemoRouteRepository: IRouteRepository {
     public func cancelSearch() async {}
 }
 
+private extension Route {
+    func withRiskCells(_ cells: [RiskCell]) -> Route {
+        Route(
+            id: id,
+            polyline: polyline,
+            totalDistance: totalDistance,
+            totalDuration: totalDuration,
+            providerOption: providerOption,
+            tollFee: tollFee,
+            taxiFare: taxiFare,
+            totalTaxiFare: totalTaxiFare,
+            isHighWay: isHighWay,
+            remainingDistance: remainingDistance,
+            remainingDuration: remainingDuration,
+            turnList: turnList,
+            riskCells: cells,
+            status: status
+        )
+    }
+}
+
 public final class DemoRouteLocationTracker: LocationTracker, DemoReplayControlling, @unchecked Sendable {
-    private let lock = NSLock(), configuration: DemoReplayConfiguration, coordinates: [Coordinate]
+    private let lock = NSLock(), configuration: DemoReplayConfiguration, coordinates: [Coordinate], speedsMps: [Double]
     private var listeners: [UUID: @Sendable (LocationSnapshot) -> Void] = [:], timer: DispatchSourceTimer?, index = 0, paused = false, currentSnapshot: LocationSnapshot = .empty, running = false
     private var speed: Double
     public var snapshot: LocationSnapshot { lock.withLock { currentSnapshot } }
     public var isRunning: Bool { lock.withLock { running } }
     public var playbackSpeed: Double { lock.withLock { speed } }
-    public init(coordinates: [Coordinate] = DemoNavigatorFixture.replayCoordinates, configuration: DemoReplayConfiguration = .init()) { self.coordinates = coordinates; self.configuration = configuration; speed = configuration.playbackSpeed }
-    public func start(sessionId: String) throws { lock.withLock { running = true; paused = false }; schedule() }
+    public init(
+        coordinates: [Coordinate] = DemoNavigatorFixture.replayCoordinates,
+        speedsMps: [Double] = DemoNavigatorFixture.replaySpeedsMps,
+        configuration: DemoReplayConfiguration = .init()
+    ) {
+        self.coordinates = coordinates
+        self.speedsMps = speedsMps
+        self.configuration = configuration
+        speed = configuration.playbackSpeed
+    }
+    public func start(sessionId: String) throws {
+        lock.withLock { running = true; paused = false }
+        emit(at: lock.withLock { index })
+        schedule()
+    }
     public func stop() { lock.withLock { running = false; timer?.cancel(); timer = nil } }
     public func pause() { lock.withLock { paused = true } }
     public func resume() { lock.withLock { paused = false }; schedule() }
     public func restart() { lock.withLock { index = 0; currentSnapshot = .empty; paused = false }; schedule() }
-    public func setPlaybackSpeed(_ speed: Double) { lock.withLock { self.speed = max(1, min(5, speed)) }; schedule() }
+    public func setPlaybackSpeed(_ speed: Double) { lock.withLock { self.speed = max(0.25, min(3, speed)) }; schedule() }
     public func seek(to target: DemoReplayTarget) {
         let targetIndex = switch target { case .start: 0; case .risk: min(205, coordinates.count - 1); case .reroute: min(130, coordinates.count - 1); case .destination: max(0, coordinates.count - 8) }
         let startIndex = lock.withLock { () -> Int in timer?.cancel(); timer = nil; return min(index, coordinates.count - 1) }
@@ -106,6 +158,9 @@ public final class DemoRouteLocationTracker: LocationTracker, DemoReplayControll
         } else {
             for value in stride(from: startIndex, through: targetIndex, by: -1) { emit(at: value) }
             lock.withLock { index = min(targetIndex + 1, coordinates.count) }
+        }
+        if target == .reroute {
+            emitOffRouteSample(near: targetIndex)
         }
         schedule()
     }
@@ -127,7 +182,7 @@ public final class DemoRouteLocationTracker: LocationTracker, DemoReplayControll
             guard running, !paused, !coordinates.isEmpty else { return nil }
             if index >= coordinates.count { if configuration.loop { index = 0 } else { timer?.cancel(); timer = nil; return nil } }
             let current = coordinates[index], next = coordinates[min(index + 1, coordinates.count - 1)]
-            let heading = demoBearing(current, next), value = LocationSnapshot(coordinate: current, speedMps: 5, heading: heading, mapMatchConfidence: 0.96)
+            let heading = demoBearing(current, next), value = LocationSnapshot(coordinate: current, speedMps: speedMps(at: index), heading: heading, mapMatchConfidence: 0.96)
             currentSnapshot = value; index += 1; return (value, Array(listeners.values))
         }
         output?.1.forEach { $0(output!.0) }
@@ -136,11 +191,39 @@ public final class DemoRouteLocationTracker: LocationTracker, DemoReplayControll
         let output: (LocationSnapshot, [@Sendable (LocationSnapshot) -> Void])? = lock.withLock {
             guard running, !paused, coordinates.indices.contains(value) else { return nil }
             let current = coordinates[value], next = coordinates[min(value + 1, coordinates.count - 1)]
-            let snapshot = LocationSnapshot(coordinate: current, speedMps: 5, heading: demoBearing(current, next), mapMatchConfidence: 0.96)
+            let snapshot = LocationSnapshot(coordinate: current, speedMps: speedMps(at: value), heading: demoBearing(current, next), mapMatchConfidence: 0.96)
             currentSnapshot = snapshot; return (snapshot, Array(listeners.values))
         }
         output?.1.forEach { $0(output!.0) }
     }
+
+    private func emitOffRouteSample(near value: Int) {
+        emitOffRouteSample(near: value, offset: 0.00065)
+        emitOffRouteSample(near: value, offset: 0.00068)
+    }
+
+    private func emitOffRouteSample(near value: Int, offset: Double) {
+        let output: (LocationSnapshot, [@Sendable (LocationSnapshot) -> Void])? = lock.withLock {
+            guard running, !paused, coordinates.indices.contains(value) else { return nil }
+            let base = coordinates[value]
+            let offRoute = Coordinate(latitude: base.latitude + offset, longitude: base.longitude + offset)
+            let snapshot = LocationSnapshot(coordinate: offRoute, speedMps: speedMps(at: value), heading: 45, mapMatchConfidence: 0.30)
+            currentSnapshot = snapshot
+            index = min(value + 1, coordinates.count)
+            return (snapshot, Array(listeners.values))
+        }
+        output?.1.forEach { $0(output!.0) }
+    }
+
+    private func speedMps(at index: Int) -> Double {
+        guard !speedsMps.isEmpty else { return 0 }
+        return speedsMps[max(0, min(index, speedsMps.count - 1))]
+    }
+}
+
+private func isNearSensorRoute(_ origin: Coordinate, _ destination: Coordinate, route: Route) -> Bool {
+    guard let first = route.polyline.first, let last = route.polyline.last else { return false }
+    return demoDistance(origin, first) <= 80 && demoDistance(destination, last) <= 80
 }
 
 private func demoDistance(_ a: Coordinate, _ b: Coordinate) -> Double { let dy = (b.latitude-a.latitude)*111_320, dx = (b.longitude-a.longitude)*111_320*cos(a.latitude * .pi/180); return sqrt(dx*dx+dy*dy) }

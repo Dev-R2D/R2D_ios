@@ -19,6 +19,7 @@ let package = Package(
         .target(name: "R2DUIKit", dependencies: [
             "R2DCore",
             "R2DAppSupport",
+            "R2DInfrastructure",
             .product(name: "GoogleMaps", package: "ios-maps-sdk", condition: .when(platforms: [.iOS])),
             .product(name: "iNaviMaps", package: "inavi-maps-sdk-ios", condition: .when(platforms: [.iOS]))
         ]),

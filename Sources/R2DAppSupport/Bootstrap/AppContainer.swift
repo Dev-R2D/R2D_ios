@@ -21,7 +21,7 @@ public final class AppContainer {
     public let telemetryPipelineName: String
     public let diagnosticsSummary: String
 
-    public init(environment: AppEnvironment, sessions: RideSessionRepository, location: LocationTracker, sensors: SensorCollector, routes: IRouteRepository, placeSearch: IPlaceSearchRepository = MockPlaceSearchRepository(), mapMatching: IMapMatchingRepository = MockMapMatchingRepository(), navigationEngine: NavigationEngine = .init(), mapRenderer: IMapRenderer, riskLayerWorker: IRiskLayerSyncWorker, appConfiguration: AppConfiguration = .init(), queue: TelemetryQueue, progress: IRideProgressRepository, telemetryPipeline: TelemetryPipeline? = nil, progressConfiguration: RideProgressSyncConfiguration = .init(), tokenProvider: TokenProvider = MockAuthProvider(), demoReplayController: DemoReplayControlling? = nil, demoResourcesAvailable: Bool = false) {
+    public init(environment: AppEnvironment, sessions: RideSessionRepository, location: LocationTracker, sensors: SensorCollector, routes: IRouteRepository, placeSearch: IPlaceSearchRepository = MockPlaceSearchRepository(), mapMatching: IMapMatchingRepository = MockMapMatchingRepository(), navigationEngine: NavigationEngine = .init(), mapRenderer: IMapRenderer, riskLayerWorker: IRiskLayerSyncWorker, appConfiguration: AppConfiguration = .init(), queue: TelemetryQueue, progress: IRideProgressRepository, telemetryPipeline: TelemetryPipeline? = nil, progressConfiguration: RideProgressSyncConfiguration = .init(), tokenProvider: TokenProvider = MockAuthProvider(), demoReplayController: DemoReplayControlling? = nil, demoResourcesAvailable: Bool = false, evidenceRecorder: RideEvidenceRecording = NoopRideEvidenceRecorder()) {
         self.environment = environment; self.mapRenderer = mapRenderer; locationAdapterName = String(describing: type(of: location)); sensorAdapterName = String(describing: type(of: sensors)); routeAdapterName = String(describing: type(of: routes)); mapRendererName = String(describing: type(of: mapRenderer))
         placeSearchAdapterName = String(describing: type(of: placeSearch)); mapMatchingAdapterName = String(describing: type(of: mapMatching))
         self.tokenProvider = tokenProvider; self.featureFlags = appConfiguration.features; self.demoReplayController = demoReplayController; self.demoResourcesAvailable = demoResourcesAvailable
@@ -29,7 +29,7 @@ public final class AppContainer {
         self.telemetryPipeline = pipeline
         telemetryPipelineName = String(describing: type(of: pipeline))
         diagnosticsSummary = "env=\(environment.rawValue) · route=\(routeAdapterName) · place=\(placeSearchAdapterName) · mapMatch=\(mapMatchingAdapterName)"
-        activeRideCoordinator = ActiveRideCoordinator(sessions: sessions, location: location, sensors: sensors, routes: routes, navigationEngine: navigationEngine, mapRenderer: mapRenderer, riskLayerWorker: riskLayerWorker, roadWarningEngine: .init(configuration: appConfiguration.roadWarning), queue: queue, progress: progress, telemetryPipeline: pipeline, progressConfiguration: progressConfiguration)
+        activeRideCoordinator = ActiveRideCoordinator(sessions: sessions, location: location, sensors: sensors, routes: routes, navigationEngine: navigationEngine, mapRenderer: mapRenderer, riskLayerWorker: riskLayerWorker, roadWarningEngine: .init(configuration: appConfiguration.roadWarning), evidenceRecorder: evidenceRecorder, queue: queue, progress: progress, telemetryPipeline: pipeline, progressConfiguration: progressConfiguration)
         viewModel = RideViewModel(coordinator: activeRideCoordinator, mapRenderer: mapRenderer, featureFlags: appConfiguration.features, demoReplayController: demoReplayController, placeSearch: placeSearch, mapMatching: mapMatching, diagnosticsSummary: diagnosticsSummary, sensorLogImporter: SensorLogImportService(pipeline: pipeline)); lifecycle = AppLifecycleController(coordinator: activeRideCoordinator, telemetryPipeline: pipeline)
     }
     public func authenticationState() async -> AuthenticationState { await tokenProvider.authenticationState() }
@@ -73,7 +73,7 @@ public final class AppContainer {
         let pipeline = TelemetryUploadWorker(queue: secureQueue, uploader: uploader)
         let riskCache: IRiskLayerCache = (try? PersistentRiskLayerCache(root: support.appendingPathComponent("R2D/RiskLayer"))) ?? InMemoryRiskLayerCache()
         let appConfig = AppConfiguration(), riskWorker = RiskLayerSyncWorker(repository: riskRepository, cache: riskCache, configuration: appConfig.riskLayerSync)
-        return .init(environment: .production, sessions: sessions, location: CoreLocationTracker(), sensors: CoreMotionSensorCollector(), routes: routes, placeSearch: placeSearch, mapMatching: mapMatching, mapRenderer: productionMapRenderer(), riskLayerWorker: riskWorker, appConfiguration: appConfig, queue: MemoryTelemetryQueue(), progress: progress, telemetryPipeline: pipeline, tokenProvider: tokenProvider)
+        return .init(environment: .production, sessions: sessions, location: CoreLocationTracker(), sensors: CoreMotionSensorCollector(), routes: routes, placeSearch: placeSearch, mapMatching: mapMatching, mapRenderer: productionMapRenderer(), riskLayerWorker: riskWorker, appConfiguration: appConfig, queue: MemoryTelemetryQueue(), progress: progress, telemetryPipeline: pipeline, tokenProvider: tokenProvider, evidenceRecorder: LocalRideEvidenceRecorder())
         #else
         return preview()
         #endif
@@ -85,7 +85,9 @@ public final class AppContainer {
     }
     public static func demoNavigator(environment: AppEnvironment = .demoNavigator) -> AppContainer {
         let resourcesAvailable = DemoResourceBundle.containsAllResourcesIncludingPackageFallback()
-        if Bundle.main.bundleURL.pathExtension == "app" { precondition(DemoResourceBundle.mainBundleContainsAllResources(), "R2D Navigator Demo resources are missing from Bundle.main") }
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            precondition(resourcesAvailable, "R2D Navigator Demo resources are missing from app and package bundles")
+        }
         let config = AppConfiguration(roadWarning: .init(maximumWarningDistanceM: 100, cooldownSec: 300), features: .navigatorDemo)
         let location = DemoRouteLocationTracker(), progress = MockProgressServer()
         progress.rideProgress = .init(validDistance: 240, confirmedDistance: 220, processingChunks: 1, acknowledgedChunks: 4, remainingChunks: 1)
@@ -93,7 +95,7 @@ public final class AppContainer {
         progress.rewardProgress = .init(pendingReward: 0, confirmedReward: 0); progress.riskLayerVersion = DemoNavigatorFixture.riskSnapshot.layerVersion
         let risk = RiskLayerSyncWorker(repository: MockRiskLayerRepository(snapshot: DemoNavigatorFixture.riskSnapshot), cache: InMemoryRiskLayerCache(), configuration: config.riskLayerSync)
         let sensors = SensorLogReplayCollector(samples: SensorLogEmulator.samples(profile: .rough))
-        return .init(environment: environment, sessions: MemoryRideSessionRepository(), location: location, sensors: sensors, routes: DemoRouteRepository(), mapRenderer: productionMapRenderer(), riskLayerWorker: risk, appConfiguration: config, queue: MemoryTelemetryQueue(), progress: progress, tokenProvider: MockAuthProvider(), demoReplayController: location, demoResourcesAvailable: resourcesAvailable)
+        return .init(environment: environment, sessions: MemoryRideSessionRepository(), location: location, sensors: sensors, routes: DemoRouteRepository(), mapRenderer: productionMapRenderer(), riskLayerWorker: risk, appConfiguration: config, queue: MemoryTelemetryQueue(), progress: progress, tokenProvider: MockAuthProvider(), demoReplayController: location, demoResourcesAvailable: resourcesAvailable, evidenceRecorder: LocalRideEvidenceRecorder())
     }
 
     private static func productionMapRenderer() -> IMapRenderer {
